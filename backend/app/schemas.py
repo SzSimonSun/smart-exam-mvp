@@ -1,5 +1,5 @@
 # app/schemas.py - Pydantic Models for API Request/Response
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 from decimal import Decimal
@@ -42,14 +42,14 @@ class ClassBase(BaseSchema):
     grade: Optional[str] = None
 
 class ClassCreate(ClassBase):
-    student_ids: Optional[List[int]] = []
+    student_ids: List[int] = Field(default_factory=list)
 
 class ClassResponse(ClassBase):
     id: int
     owner_teacher_id: int
 
 class ClassWithStudents(ClassResponse):
-    students: List[UserResponse] = []
+    students: List[UserResponse] = Field(default_factory=list)
 
 # Knowledge Point Schemas
 class KnowledgePointBase(BaseSchema):
@@ -66,7 +66,7 @@ class KnowledgePointCreate(KnowledgePointBase):
 class KnowledgePointResponse(KnowledgePointBase):
     id: int
     parent_id: Optional[int] = None
-    children: List['KnowledgePointResponse'] = []
+    children: List['KnowledgePointResponse'] = Field(default_factory=list)
 
 # Question Schemas
 class QuestionBase(BaseSchema):
@@ -79,7 +79,7 @@ class QuestionBase(BaseSchema):
     source_meta: Optional[Dict[str, Any]] = None
 
 class QuestionCreate(QuestionBase):
-    knowledge_point_ids: List[int] = []
+    knowledge_point_ids: List[int] = Field(default_factory=list)
 
 class QuestionUpdate(BaseModel):
     stem: Optional[str] = None
@@ -95,7 +95,7 @@ class QuestionResponse(QuestionBase):
     created_by: int
     status: str
     created_at: datetime
-    knowledge_points: List[KnowledgePointResponse] = []
+    knowledge_points: List[KnowledgePointResponse] = Field(default_factory=list)
 
 class QuestionListResponse(BaseModel):
     items: List[QuestionResponse]
@@ -133,11 +133,13 @@ class PaperExportResponse(BaseModel):
 class AnswerSheetUpload(BaseModel):
     paper_id: int
     class_id: int
+    student_id: Optional[int] = None
+
 
 class AnswerSheetResponse(BaseModel):
     id: int
     paper_id: int
-    student_id: int
+    student_id: Optional[int] = None
     class_id: int
     status: str
     created_at: datetime
@@ -156,7 +158,7 @@ class AnswerSheetReport(BaseModel):
     student_name: str
     paper_name: str
     total_score: Decimal
-    answers: List[AnswerResponse]
+    answers: List[AnswerResponse] = Field(default_factory=list)
 
 # Statistics Schemas
 class KnowledgePointStat(BaseModel):
@@ -167,17 +169,19 @@ class KnowledgePointStat(BaseModel):
     wrong_rate: float
     last3_wrong_rate: Optional[float] = None
 
+
 class StudentKnowledgeStats(BaseModel):
     student_id: int
     student_name: str
-    knowledge_points: List[KnowledgePointStat]
+    knowledge_points: List[KnowledgePointStat] = Field(default_factory=list)
+
 
 class ClassOverview(BaseModel):
     class_id: int
     class_name: str
     student_count: int
     avg_score: float
-    top_wrong_kps: List[KnowledgePointStat]
+    top_wrong_kps: List[KnowledgePointStat] = Field(default_factory=list)
 
 # Ingest Schemas
 class IngestSessionCreate(BaseModel):
@@ -208,7 +212,7 @@ class IngestItemApprove(BaseModel):
     options_json: Optional[Dict[str, Any]] = None
     answer_json: Optional[Dict[str, Any]] = None
     analysis: Optional[str] = None
-    knowledge_point_ids: List[int] = []
+    knowledge_point_ids: List[int] = Field(default_factory=list)
 
 class IngestItemReject(BaseModel):
     reason: str

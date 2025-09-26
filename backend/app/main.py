@@ -1,58 +1,49 @@
+from __future__ import annotations
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
-from sqlalchemy.orm import Session
-from datetime import timedelta
+from decimal import Decimal
 from typing import List, Optional
-import hashlib
+from uuid import uuid4
+
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import asc, or_
+from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
+from .auth import get_current_active_user, get_teacher_user
 from .database import get_db
+from .models import (
+    Answer,
+    AnswerSheet,
+    Class,
+    ClassStudent,
+    KnowledgePoint,
+    Paper,
+    Question,
+    QuestionKnowledgeMap,
+    User,
+)
+from .routers import auth as auth_router
+from .storage import store_answer_sheet_file
+from .schemas import (
+    AnswerResponse,
+    AnswerSheetReport,
+    AnswerSheetResponse,
+    CurrentUser,
+    KnowledgePointResponse,
+    QuestionCreate,
+    QuestionListResponse,
+    QuestionResponse,
+)
 
-# Simple schemas for MVP
-from pydantic import BaseModel, EmailStr
-
-class UserLogin(BaseModel):
-    email: str
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-class UserResponse(BaseModel):
-    id: int
-    email: str
-    name: str
-    role: str
-
-class KnowledgePointResponse(BaseModel):
-    id: int
-    subject: str
-    module: Optional[str] = None
-    point: Optional[str] = None
-    code: Optional[str] = None
-    level: Optional[int] = None
-
-class QuestionCreate(BaseModel):
-    stem: str
-    type: str
-    difficulty: int = 2
-    options_json: Optional[dict] = None
-    answer_json: Optional[dict] = None
-    analysis: Optional[str] = None
-    knowledge_point_ids: List[int] = []
-
-class QuestionResponse(BaseModel):
-    id: int
-    stem: str
-    type: str
-    difficulty: int
-    status: str
-    created_at: str
-
-app = FastAPI(title="Smart Exam System - MVP API", version="1.0.0")
+app = FastAPI(title="Smart Exam System - MVP API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,161 +53,148 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-security = HTTPBearer(auto_error=False)
+app.include_router(auth_router.router)
 
-# Simple password verification (for MVP)
-def verify_password(plain_password: str, stored_password: str) -> bool:
-    # For MVP, using simple comparison (in production, use proper hashing)
-    return stored_password.startswith('$2b$') and len(stored_password) > 50
-
-def get_current_user(credentials = Depends(security), db: Session = Depends(get_db)):
-    """Get current user from token (simplified for MVP)"""
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    
-    # For MVP, we'll use a simple approach
-    # In production, decode JWT properly
-    from sqlalchemy import text
-    result = db.execute(text("SELECT id, email, name, role FROM users WHERE role = 'teacher' LIMIT 1"))
-    user = result.fetchone()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    return {
-        "id": user[0],
-        "email": user[1],
-        "name": user[2],
-        "role": user[3]
-    }
 
 @app.get("/health")
-def health():
+def health() -> dict:
     return {"status": "ok", "app": settings.app_name}
 
-# 3.1 认证 & 用户
-@app.post("/api/auth/login", response_model=Token)
-def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
-    """邮箱+密码→JWT"""
-    from sqlalchemy import text
-    
-    # Simple authentication for MVP
-    result = db.execute(
-        text("SELECT id, email, name, role, password_hash FROM users WHERE email = :email"),
-        {"email": user_credentials.email}
-    )
-    user = result.fetchone()
-    
-    if not user or not verify_password(user_credentials.password, user[4]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
-        )
-    
-    # For MVP, return a simple token
-    access_token = f"token_for_{user[0]}_{hashlib.md5(user[1].encode()).hexdigest()[:8]}"
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
 
-@app.get("/api/users/me", response_model=UserResponse)
-def get_current_user_info(current_user = Depends(get_current_user)):
-    """当前用户信息"""
+@app.get("/api/users/me", response_model=CurrentUser)
+def read_current_user(
+    current_user: User = Depends(get_current_active_user),
+) -> CurrentUser:
     return current_user
 
-# 3.2 知识点 & 题库
-@app.get("/api/knowledge-points", response_model=List[KnowledgePointResponse])
-def get_knowledge_points(
+
+def _build_knowledge_point_tree(kps: List[KnowledgePoint]) -> List[KnowledgePointResponse]:
+    nodes: dict[int, KnowledgePointResponse] = {}
+    roots: List[KnowledgePointResponse] = []
+
+    for kp in kps:
+        node = KnowledgePointResponse.model_validate(kp, from_attributes=True)
+        node = node.model_copy(update={"children": []})
+        nodes[kp.id] = node
+
+    for kp in kps:
+        node = nodes[kp.id]
+        if kp.parent_id and kp.parent_id in nodes:
+            parent = nodes[kp.parent_id]
+            parent.children.append(node)
+        else:
+            roots.append(node)
+
+    return roots
+
+
+@app.get(
+    "/api/knowledge-points",
+    response_model=List[KnowledgePointResponse],
+)
+def list_knowledge_points(
     subject: Optional[str] = None,
     q: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """树形返回知识点"""
-    from sqlalchemy import text
-    
-    query = "SELECT id, subject, module, point, code, level FROM knowledge_points WHERE 1=1"
-    params = {}
-    
+    _: User = Depends(get_current_active_user),
+) -> List[KnowledgePointResponse]:
+    query = db.query(KnowledgePoint)
+
     if subject:
-        query += " AND subject = :subject"
-        params["subject"] = subject
-        
+        query = query.filter(KnowledgePoint.subject == subject)
+
     if q:
-        query += " AND (point ILIKE :q OR module ILIKE :q)"
-        params["q"] = f"%{q}%"
-    
-    query += " ORDER BY subject, level, id"
-    
-    result = db.execute(text(query), params)
-    knowledge_points = []
-    
-    for row in result:
-        knowledge_points.append({
-            "id": row[0],
-            "subject": row[1],
-            "module": row[2],
-            "point": row[3],
-            "code": row[4],
-            "level": row[5]
-        })
-    
-    return knowledge_points
-
-@app.post("/api/questions", response_model=QuestionResponse)
-def create_question(
-    question: QuestionCreate,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """新建题（含选项/答案/解析/知识点映射）"""
-    from sqlalchemy import text
-    import json
-    from datetime import datetime
-    
-    # Insert question
-    result = db.execute(
-        text("""
-            INSERT INTO questions (stem, type, difficulty, options_json, answer_json, analysis, created_by, status, created_at)
-            VALUES (:stem, :type, :difficulty, :options_json, :answer_json, :analysis, :created_by, 'draft', :created_at)
-            RETURNING id, created_at
-        """),
-        {
-            "stem": question.stem,
-            "type": question.type,
-            "difficulty": question.difficulty,
-            "options_json": json.dumps(question.options_json) if question.options_json else None,
-            "answer_json": json.dumps(question.answer_json) if question.answer_json else None,
-            "analysis": question.analysis,
-            "created_by": current_user["id"],
-            "created_at": datetime.utcnow()
-        }
-    )
-    
-    new_question = result.fetchone()
-    question_id = new_question[0]
-    
-    # Insert knowledge point mappings
-    for kp_id in question.knowledge_point_ids:
-        db.execute(
-            text("INSERT INTO question_knowledge_map (question_id, kp_id) VALUES (:qid, :kpid)"),
-            {"qid": question_id, "kpid": kp_id}
+        like_pattern = f"%{q}%"
+        query = query.filter(
+            or_(
+                KnowledgePoint.point.ilike(like_pattern),
+                KnowledgePoint.module.ilike(like_pattern),
+            )
         )
-    
-    db.commit()
-    
-    return {
-        "id": question_id,
-        "stem": question.stem,
-        "type": question.type,
-        "difficulty": question.difficulty,
-        "status": "draft",
-        "created_at": new_question[1].isoformat()
-    }
 
-@app.get("/api/questions", response_model=List[QuestionResponse])
-def get_questions(
+    points = (
+        query.order_by(
+            KnowledgePoint.subject,
+            asc(KnowledgePoint.level).nullsfirst(),
+            KnowledgePoint.id,
+        )
+        .all()
+    )
+
+    return _build_knowledge_point_tree(points)
+
+
+def _question_to_response(question: Question) -> QuestionResponse:
+    kp_nodes = [
+        KnowledgePointResponse.model_validate(
+            mapping.knowledge_point, from_attributes=True
+        )
+        for mapping in question.knowledge_points
+        if mapping.knowledge_point is not None
+    ]
+
+    return QuestionResponse(
+        id=question.id,
+        stem=question.stem,
+        type=question.type,
+        difficulty=question.difficulty,
+        options_json=question.options_json,
+        answer_json=question.answer_json,
+        analysis=question.analysis,
+        source_meta=question.source_meta,
+        created_by=question.created_by,
+        status=question.status,
+        created_at=question.created_at,
+        knowledge_points=kp_nodes,
+    )
+
+
+@app.post("/api/questions", response_model=QuestionResponse, status_code=201)
+def create_question(
+    payload: QuestionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_teacher_user),
+) -> QuestionResponse:
+    if not payload.knowledge_point_ids:
+        raise HTTPException(status_code=400, detail="knowledge_point_ids cannot be empty")
+
+    kps = (
+        db.query(KnowledgePoint)
+        .filter(KnowledgePoint.id.in_(payload.knowledge_point_ids))
+        .all()
+    )
+
+    if len(kps) != len(set(payload.knowledge_point_ids)):
+        raise HTTPException(status_code=404, detail="One or more knowledge points not found")
+
+    question = Question(
+        stem=payload.stem,
+        type=payload.type,
+        difficulty=payload.difficulty,
+        options_json=payload.options_json,
+        answer_json=payload.answer_json,
+        analysis=payload.analysis,
+        source_meta=payload.source_meta,
+        created_by=current_user.id,
+        status="draft",
+    )
+
+    db.add(question)
+    db.flush()
+
+    mappings = [
+        QuestionKnowledgeMap(question_id=question.id, kp_id=kp.id) for kp in kps
+    ]
+    db.add_all(mappings)
+
+    db.commit()
+    db.refresh(question)
+
+    return _question_to_response(question)
+
+
+@app.get("/api/questions", response_model=QuestionListResponse)
+def list_questions(
     kp: Optional[str] = None,
     type: Optional[str] = None,
     difficulty: Optional[int] = None,
@@ -224,104 +202,180 @@ def get_questions(
     page: int = 1,
     size: int = 20,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """查询题目"""
-    from sqlalchemy import text
-    
-    query = """
-        SELECT DISTINCT q.id, q.stem, q.type, q.difficulty, q.status, q.created_at
-        FROM questions q
-        LEFT JOIN question_knowledge_map qkm ON q.id = qkm.question_id
-        LEFT JOIN knowledge_points kp ON qkm.kp_id = kp.id
-        WHERE 1=1
-    """
-    params = {}
-    
+    _: User = Depends(get_current_active_user),
+) -> QuestionListResponse:
+    if page < 1 or size < 1:
+        raise HTTPException(status_code=400, detail="page and size must be positive integers")
+
+    query = db.query(Question).options(
+        selectinload(Question.knowledge_points).selectinload(
+            QuestionKnowledgeMap.knowledge_point
+        )
+    )
+
     if kp:
-        query += " AND kp.code = :kp_code"
-        params["kp_code"] = kp
-    
+        query = query.join(QuestionKnowledgeMap).join(KnowledgePoint).filter(
+            KnowledgePoint.code == kp
+        )
+
     if type:
-        query += " AND q.type = :type"
-        params["type"] = type
-        
-    if difficulty:
-        query += " AND q.difficulty = :difficulty"
-        params["difficulty"] = difficulty
-        
+        query = query.filter(Question.type == type)
+
+    if difficulty is not None:
+        query = query.filter(Question.difficulty == difficulty)
+
     if q:
-        query += " AND q.stem ILIKE :search"
-        params["search"] = f"%{q}%"
-    
-    query += " ORDER BY q.id DESC LIMIT :size OFFSET :offset"
-    params["size"] = size
-    params["offset"] = (page - 1) * size
-    
-    result = db.execute(text(query), params)
-    questions = []
-    
-    for row in result:
-        questions.append({
-            "id": row[0],
-            "stem": row[1][:200] + "..." if len(row[1]) > 200 else row[1],  # Truncate for list view
-            "type": row[2],
-            "difficulty": row[3],
-            "status": row[4],
-            "created_at": row[5].isoformat() if row[5] else None
-        })
-    
-    return questions
+        query = query.filter(Question.stem.ilike(f"%{q}%"))
+
+    filtered_query = query.distinct()
+    total = filtered_query.count()
+
+    items = (
+        filtered_query.order_by(Question.created_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+        .all()
+    )
+
+    responses = [_question_to_response(question) for question in items]
+
+    return QuestionListResponse(items=responses, total=total, page=page, size=size)
+
 
 @app.post("/api/questions/{question_id}/publish")
 def publish_question(
     question_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """发布题目"""
-    from sqlalchemy import text
-    
-    result = db.execute(
-        text("UPDATE questions SET status = 'published' WHERE id = :id AND created_by = :user_id"),
-        {"id": question_id, "user_id": current_user["id"]}
-    )
-    
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Question not found or no permission")
-    
+    current_user: User = Depends(get_teacher_user),
+) -> dict:
+    question = db.query(Question).filter(Question.id == question_id).first()
+
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    if current_user.role != "admin" and question.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="No permission to publish this question")
+
+    question.status = "published"
     db.commit()
+
     return {"message": "Question published successfully"}
 
-@app.post("/api/answer-sheets/upload")
-async def upload_sheet(
-    paper_id: int, 
-    class_id: int, 
+@app.post("/api/answer-sheets/upload", response_model=AnswerSheetResponse, status_code=201)
+async def upload_answer_sheet(
+    paper_id: int = Form(...),
+    class_id: int = Form(...),
+    student_id: Optional[int] = Form(None),
     file: UploadFile = File(...),
-    current_user = Depends(get_current_user)
-):
-    # TODO: store file to MinIO and enqueue OCR/OMR task
-    return {
-        "status": "accepted", 
-        "paper_id": paper_id, 
-        "class_id": class_id, 
-        "filename": file.filename,
-        "message": "File uploaded successfully, processing will begin shortly"
-    }
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_teacher_user),
+) -> AnswerSheetResponse:
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
 
-@app.get("/api/answer-sheets/{sheet_id}/report")
-def get_report(
+    class_obj = db.query(Class).filter(Class.id == class_id).first()
+    if class_obj is None:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    if current_user.role != "admin" and class_obj.owner_teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No permission to upload for this class")
+
+    if student_id is not None:
+        membership = (
+            db.query(ClassStudent)
+            .filter(ClassStudent.class_id == class_id, ClassStudent.student_id == student_id)
+            .first()
+        )
+        if membership is None:
+            raise HTTPException(status_code=400, detail="Student is not enrolled in the class")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        object_name = store_answer_sheet_file(
+            original_filename=file.filename or "upload.bin",
+            data=file_bytes,
+            content_type=file.content_type,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail="Failed to persist uploaded file") from exc
+
+    sheet = AnswerSheet(
+        paper_id=paper_id,
+        student_id=student_id,
+        class_id=class_id,
+        qr_token=uuid4().hex,
+        upload_uri=object_name,
+        status="uploaded",
+    )
+
+    db.add(sheet)
+    db.commit()
+    db.refresh(sheet)
+
+    return AnswerSheetResponse(
+        id=sheet.id,
+        paper_id=sheet.paper_id,
+        student_id=sheet.student_id,
+        class_id=sheet.class_id,
+        status=sheet.status,
+        created_at=sheet.created_at,
+    )
+
+
+@app.get("/api/answer-sheets/{sheet_id}/report", response_model=AnswerSheetReport)
+def get_answer_sheet_report(
     sheet_id: int,
-    current_user = Depends(get_current_user)
-):
-    # TODO: return simple mock report for MVP demo
-    return {
-        "sheet_id": sheet_id, 
-        "student_name": "学生示例",
-        "paper_name": "示例试卷",
-        "total_score": 95, 
-        "items": [
-            {"question_id": 1, "score": 10, "is_correct": True},
-            {"question_id": 2, "score": 8, "is_correct": False},
-        ]
-    }
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> AnswerSheetReport:
+    sheet = (
+        db.query(AnswerSheet)
+        .options(
+            selectinload(AnswerSheet.answers),
+            selectinload(AnswerSheet.paper),
+            selectinload(AnswerSheet.student),
+            selectinload(AnswerSheet.class_),
+        )
+        .filter(AnswerSheet.id == sheet_id)
+        .first()
+    )
+
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Answer sheet not found")
+
+    if current_user.role == "teacher":
+        if sheet.class_ is None or sheet.class_.owner_teacher_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to view this report")
+    elif current_user.role == "student":
+        if sheet.student_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No permission to view this report")
+
+    answers: List[Answer] = sheet.answers or []
+    total_score = Decimal("0")
+    for answer in answers:
+        total_score += answer.score or Decimal("0")
+
+    answer_responses = [
+        AnswerResponse(
+            id=answer.id,
+            question_id=answer.question_id,
+            parsed_json=answer.parsed_json,
+            is_objective=answer.is_objective,
+            is_correct=answer.is_correct,
+            score=answer.score,
+            error_flag=answer.error_flag,
+        )
+        for answer in answers
+    ]
+
+    return AnswerSheetReport(
+        sheet_id=sheet.id,
+        student_name=sheet.student.name if sheet.student else "未指定学生",
+        paper_name=sheet.paper.name if sheet.paper else "未匹配试卷",
+        total_score=total_score,
+        answers=answer_responses,
+    )
