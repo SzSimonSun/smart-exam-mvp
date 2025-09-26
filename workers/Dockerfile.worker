@@ -1,0 +1,32 @@
+# Worker服务的Dockerfile
+FROM python:3.11-slim
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制Worker依赖文件
+COPY workers/requirements.txt /app/workers/requirements.txt
+
+# 安装Python依赖
+RUN pip install --no-cache-dir -r /app/workers/requirements.txt
+
+# 复制Worker代码
+COPY workers/ /app/workers/
+
+# 设置环境变量
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# 启动Worker
+CMD ["python", "/app/workers/worker_startup.py"]

@@ -1,0 +1,3 @@
+stem,type,difficulty,options_json,answer_json,analysis,source_meta,status
+"下列哪个是质数？","single",2,"[""A. 9"",""B. 11"",""C. 15"",""D. 21""]","{""choice"":""B""}","质数定义：仅能被1和自身整除。","{""source"":""样例""}","published"
+"一元二次方程求根公式是？","fill",3,,"{""text"":""x=[-b±√(b^2-4ac)]/(2a)""}","标准求根公式。","{""source"":""样例""}","published"

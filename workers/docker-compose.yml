@@ -1,0 +1,75 @@
+# Worker服务的Docker Compose配置
+version: '3.8'
+
+services:
+  # OCR/OMR Worker - 版面定位、仿射校正、OMR/OCR、题块切片
+  ocr-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - WORKER_TYPE=ocr
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://exam:exam@postgres:5432/examdb
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minio
+      - MINIO_SECRET_KEY=minio123
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+      - minio
+    volumes:
+      - ./workers:/app/workers
+    networks:
+      - smart-exam-network
+    restart: unless-stopped
+
+  # 自动判分 Worker - 客观题判分、日志回写
+  autograde-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - WORKER_TYPE=autograde
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://exam:exam@postgres:5432/examdb
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    volumes:
+      - ./workers:/app/workers
+    networks:
+      - smart-exam-network
+    restart: unless-stopped
+
+  # 拆题入库 Worker - 拆题分割、OCR、候选知识点（NLP）生成
+  ingest-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - WORKER_TYPE=ingest
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://exam:exam@postgres:5432/examdb
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minio
+      - MINIO_SECRET_KEY=minio123
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+      - minio
+    volumes:
+      - ./workers:/app/workers
+    networks:
+      - smart-exam-network
+    restart: unless-stopped
+
+networks:
+  smart-exam-network:
+    external: true

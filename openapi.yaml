@@ -1,0 +1,192 @@
+
+openapi: 3.0.3
+info:
+  title: Smart Exam System - MVP API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8000
+paths:
+  /api/auth/login:
+    post:
+      summary: Login and receive JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+  /api/knowledge-points:
+    get:
+      summary: Get knowledge points tree
+      parameters:
+        - in: query
+          name: subject
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+  /api/questions:
+    get:
+      summary: Query questions
+      parameters:
+        - in: query
+          name: kp
+          schema: { type: string }
+        - in: query
+          name: type
+          schema: { type: string }
+        - in: query
+          name: difficulty
+          schema: { type: integer }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201': { description: Created }
+  /api/papers:
+    post:
+      summary: Create paper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201': { description: Created }
+  /api/papers/{id}/export:
+    post:
+      summary: Export paper to PDF
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pdf_uri: { type: string }
+                  qr_schema: { type: object }
+  /api/answer-sheets/upload:
+    post:
+      summary: Upload scanned answer sheet
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                paper_id: { type: integer }
+                class_id: { type: integer }
+                file: { type: string, format: binary }
+      responses:
+        '202': { description: Accepted and queued }
+  /internal/ocr-omr/callback:
+    post:
+      summary: OCR/OMR result callback (internal)
+      responses:
+        '204': { description: No Content }
+  /api/answer-sheets/{id}/report:
+    get:
+      summary: Get single sheet report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /api/stats/student/{student_id}/kps:
+    get:
+      summary: Student knowledge point stats
+      parameters:
+        - in: path
+          name: student_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /api/ingest/sessions:
+    post:
+      summary: Create ingest session (upload exam PDF/image)
+      responses:
+        '201': { description: Created }
+  /api/ingest/sessions/{id}/items:
+    get:
+      summary: Get ingest items for review
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /api/ingest/items/{item_id}/approve:
+    post:
+      summary: Approve a candidate question into the bank
+      parameters:
+        - in: path
+          name: item_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /api/ingest/items/{item_id}/reject:
+    post:
+      summary: Reject candidate question
+      parameters:
+        - in: path
+          name: item_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /api/ingest/sessions/{id}/complete:
+    post:
+      summary: Complete ingest session
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
