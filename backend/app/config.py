@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "Smart Exam System"
     debug: bool = True
+    local_storage_path: str = "var/storage"
     
     # CORS
     cors_origins: list = ["http://localhost:3000", "http://localhost:5173"]
