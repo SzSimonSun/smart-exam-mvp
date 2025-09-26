@@ -1,0 +1,9 @@
+stem,type,difficulty,options_json,answer_json,analysis,source_meta,status
+"下列哪个是质数？","single",2,"{""A"": ""4"", ""B"": ""9"", ""C"": ""11"", ""D"": ""15""}","{""answer"": ""C""}","质数定义：大于1且仅能被1和自身整除的自然数。","{""source"": ""数学基础练习""}","published"
+"下列哪些是质数？（多选）","multiple",3,"{""A"": ""2"", ""B"": ""3"", ""C"": ""4"", ""D"": ""5"", ""E"": ""6""}","{""answer"": [""A"", ""B"", ""D""]}","2、3、5都是质数。","{""source"": ""数学基础练习""}","published"
+"一元二次方程 x² - 5x + 6 = 0 的解是 ______","fill",2,"{}","{""answer"": ""x = 2 或 x = 3""}","利用因式分解：(x-2)(x-3) = 0","{""source"": ""代数练习册""}","published"
+"一元二次方程求根公式是 ______","fill",3,"{}","{""answer"": ""x = [-b ± √(b²-4ac)] / (2a)""}","标准求根公式。","{""source"": ""代数教材""}","published"
+"判断：所有的矩形都是正方形","judge",1,"{}","{""answer"": false}","矩形的四个角都是直角，但四边不一定相等。","{""source"": ""几何基础""}","published"
+"三角形的内角和是多少度？","single",1,"{""A"": ""90°"", ""B"": ""180°"", ""C"": ""270°"", ""D"": ""360°""}","{""answer"": ""B""}","三角形内角和定理：180°。","{""source"": ""几何基础""}","published"
+"I ______ to school every day.","single",1,"{""A"": ""go"", ""B"": ""goes"", ""C"": ""going"", ""D"": ""went""}","{""answer"": ""A""}","主语I是第一人称，动词用原形。","{""source"": ""英语语法练习""}","published"
+"He ______ his homework yesterday.","single",1,"{""A"": ""do"", ""B"": ""does"", ""C"": ""did"", ""D"": ""doing""}","{""answer"": ""C""}","yesterday表示过去时间，用过去时。","{""source"": ""英语语法练习""}","published"
