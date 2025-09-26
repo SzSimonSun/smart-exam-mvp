@@ -195,6 +195,8 @@ def create_question(
     )
     
     new_question = result.fetchone()
+    if not new_question:
+        raise HTTPException(status_code=500, detail="Failed to create question")
     question_id = new_question[0]
     
     # Insert knowledge point mappings
@@ -212,7 +214,7 @@ def create_question(
         "type": question.type,
         "difficulty": question.difficulty,
         "status": "draft",
-        "created_at": new_question[1].isoformat()
+        "created_at": str(new_question[1]) if new_question[1] else None
     }
 
 @app.get("/api/questions", response_model=List[QuestionResponse])
@@ -268,7 +270,7 @@ def get_questions(
             "type": row[2],
             "difficulty": row[3],
             "status": row[4],
-            "created_at": row[5].isoformat() if row[5] else None
+            "created_at": str(row[5]) if row[5] else None
         })
     
     return questions
@@ -287,7 +289,12 @@ def publish_question(
         {"id": question_id, "user_id": current_user["id"]}
     )
     
-    if result.rowcount == 0:
+    # Check if update was successful by querying the question
+    check_result = db.execute(
+        text("SELECT id FROM questions WHERE id = :id AND created_by = :user_id"),
+        {"id": question_id, "user_id": current_user["id"]}
+    )
+    if not check_result.fetchone():
         raise HTTPException(status_code=404, detail="Question not found or no permission")
     
     db.commit()
