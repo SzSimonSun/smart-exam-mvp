@@ -1,10 +1,12 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import 'antd/dist/reset.css'
+
+console.log('主应用启动...')
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
+  <React.StrictMode>
     <App />
-  </BrowserRouter>
+  </React.StrictMode>
 )
