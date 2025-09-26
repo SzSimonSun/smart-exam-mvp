@@ -10,6 +10,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -261,11 +262,48 @@ def publish_question(
 
     return {"message": "Question published successfully"}
 
+def _require_parameter(name: str, form_value: Optional[int], query_value: Optional[int]) -> int:
+    if form_value is not None:
+        return form_value
+    if query_value is not None:
+        return query_value
+    raise HTTPException(status_code=422, detail=f"{name} is required")
+
+
+def _optional_parameter(
+    form_value: Optional[int], query_value: Optional[int]
+) -> Optional[int]:
+    if form_value is not None:
+        return form_value
+    return query_value
+
+
+def _paper_id_parameter(
+    paper_id_form: Optional[int] = Form(None),
+    paper_id_query: Optional[int] = Query(None),
+) -> int:
+    return _require_parameter("paper_id", paper_id_form, paper_id_query)
+
+
+def _class_id_parameter(
+    class_id_form: Optional[int] = Form(None),
+    class_id_query: Optional[int] = Query(None),
+) -> int:
+    return _require_parameter("class_id", class_id_form, class_id_query)
+
+
+def _student_id_parameter(
+    student_id_form: Optional[int] = Form(None),
+    student_id_query: Optional[int] = Query(None),
+) -> Optional[int]:
+    return _optional_parameter(student_id_form, student_id_query)
+
+
 @app.post("/api/answer-sheets/upload", response_model=AnswerSheetResponse, status_code=201)
 async def upload_answer_sheet(
-    paper_id: int = Form(...),
-    class_id: int = Form(...),
-    student_id: Optional[int] = Form(None),
+    paper_id: int = Depends(_paper_id_parameter),
+    class_id: int = Depends(_class_id_parameter),
+    student_id: Optional[int] = Depends(_student_id_parameter),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_teacher_user),
