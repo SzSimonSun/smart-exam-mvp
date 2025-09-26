@@ -15,16 +15,15 @@ export const useUpload = () => {
 
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('paper_id', paperId)
-    formData.append('class_id', classId)
 
-    // 添加其他选项
+    // 添加其他选项到FormData
     Object.keys(options).forEach(key => {
       formData.append(key, options[key])
     })
 
     try {
-      const response = await api.post('/api/answer-sheets/upload', formData, {
+      // 将paper_id和class_id作为查询参数发送
+      const response = await api.post(`/api/answer-sheets/upload?paper_id=${paperId}&class_id=${classId}`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },

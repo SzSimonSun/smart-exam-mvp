@@ -7,6 +7,14 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
 [![Ant Design Pro](https://img.shields.io/badge/Ant%20Design%20Pro-5.x-red.svg)](https://pro.ant.design/)
 
+## 🐛 已修复问题
+
+### ✅ 答题卡上传表单验证失败 (已修复)
+- **问题**: 上传时提示 `query -> paper_id: Field required` 错误
+- **原因**: 后端期望paper_id和class_id作为查询参数，前端发送为FormData
+- **修复**: 修改[useUpload.js](frontend_vite/src/hooks/useUpload.js)，将参数作为查询参数发送
+- **验证**: `./test_upload.sh` 测试通过
+
 ## ✨ 功能特性
 
 ### 🎯 核心功能

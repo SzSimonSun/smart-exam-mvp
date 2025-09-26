@@ -13,7 +13,9 @@ export default function UploadScan() {
   
   // 使用hooks
   const { uploading, progress, uploadedFiles, uploadAnswerSheet, clearUploadedFiles } = useUpload()
-  const { papers } = usePapers()
+  const { papers, loading: papersLoading } = usePapers()
+  
+  console.log('📊 Papers data:', papers, 'Loading:', papersLoading)
 
   // 文件上传前的检查
   const beforeUpload = (file) => {
@@ -70,10 +72,14 @@ export default function UploadScan() {
                   label="选择试卷"
                   rules={[{ required: true, message: '请选择试卷' }]}
                 >
-                  <Select placeholder="请选择试卷">
+                  <Select 
+                    placeholder="请选择试卷" 
+                    loading={papersLoading}
+                    notFoundContent={papersLoading ? '加载中...' : '暂无试卷'}
+                  >
                     {papers.map(paper => (
                       <Option key={paper.id} value={paper.id}>
-                        {paper.name}
+                        {paper.name} ({paper.subject} - {paper.grade})
                       </Option>
                     ))}
                   </Select>

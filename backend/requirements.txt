@@ -6,6 +6,11 @@ psycopg2-binary==2.9.9
 minio==7.2.5
 redis==5.0.8
 
+# PDF and QR Code generation
+reportlab==4.0.7
+qrcode==7.4.2
+pillow==10.1.0
+
 # Database ORM
 sqlalchemy==2.0.32
 alembic==1.13.2
