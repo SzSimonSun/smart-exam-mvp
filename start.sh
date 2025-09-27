@@ -64,6 +64,9 @@ else
     echo "⚠️  警告：未找到虚拟环境，使用系统Python"
 fi
 
+# 确保PID目录存在
+mkdir -p "../$PID_DIR"
+
 # 启动后端
 nohup uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 > ../backend.log 2>&1 &
 BACKEND_PID=$!
@@ -85,6 +88,9 @@ done
 # 启动前端服务
 echo "🚀 启动前端服务..."
 cd frontend_vite
+
+# 确保PID目录存在
+mkdir -p "../$PID_DIR"
 
 # 确保强制使用5173端口
 nohup npm run dev -- --port 5173 --host 0.0.0.0 > ../frontend.log 2>&1 &
