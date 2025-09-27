@@ -136,20 +136,35 @@ def get_current_user(credentials = Depends(security), db: Session = Depends(get_
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication required")
     
-    # For MVP, we'll use a simple approach
-    # In production, decode JWT properly
-    from sqlalchemy import text
-    result = db.execute(text("SELECT id, email, name, role FROM users WHERE role = 'teacher' LIMIT 1"))
-    user = result.fetchone()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+    # Extract user ID from token (format: token_for_{user_id}_{hash})
+    token = credentials.credentials
+    if not token.startswith("token_for_"):
+        raise HTTPException(status_code=401, detail="Invalid token format")
     
-    return {
-        "id": user[0],
-        "email": user[1],
-        "name": user[2],
-        "role": user[3]
-    }
+    try:
+        # Parse user ID from token
+        token_parts = token.split("_")
+        user_id = int(token_parts[2])  # token_for_{user_id}_{hash}
+        
+        from sqlalchemy import text
+        result = db.execute(
+            text("SELECT id, email, name, role FROM users WHERE id = :user_id"),
+            {"user_id": user_id}
+        )
+        user = result.fetchone()
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        return {
+            "id": user[0],
+            "email": user[1],
+            "name": user[2],
+            "role": user[3]
+        }
+        
+    except (ValueError, IndexError) as e:
+        raise HTTPException(status_code=401, detail="Invalid token format")
 
 @app.get("/health")
 def health():
