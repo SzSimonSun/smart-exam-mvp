@@ -24,26 +24,31 @@ const SmartExamProLayout = ({ children }) => {
   const menuData = [
     {
       path: '/questions',
+      key: '/questions',
       name: '题库管理',
       icon: <BookOutlined />,
     },
     {
       path: '/paper',
+      key: '/paper',
       name: '试卷构建',
       icon: <FileTextOutlined />,
     },
     {
       path: '/upload',
+      key: '/upload',
       name: '扫描上传',
       icon: <CloudUploadOutlined />,
     },
     {
       path: '/report',
+      key: '/report',
       name: '成绩报告',
       icon: <BarChartOutlined />,
     },
     {
       path: '/ingest',
+      key: '/ingest',
       name: '拆题入库',
       icon: <DatabaseOutlined />,
     },
@@ -93,11 +98,17 @@ const SmartExamProLayout = ({ children }) => {
         routes: menuData,
       }}
       menuDataRender={() => menuData}
-      menuItemRender={(item, dom) => (
-        <div onClick={() => navigate(item.path)}>
-          {dom}
-        </div>
-      )}
+      // 使用 ProLayout 的默认路由处理，防止新开标签页
+      onMenuHeaderClick={(e) => {
+        console.log('菜单点击:', e)
+        return false
+      }}
+      menuProps={{
+        onClick: ({ key }) => {
+          console.log('菜单项点击:', key)
+          navigate(key)
+        }
+      }}
       avatarProps={{
         src: user?.avatar,
         title: user?.name || '用户',
