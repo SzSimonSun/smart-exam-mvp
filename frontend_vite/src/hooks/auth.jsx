@@ -43,23 +43,34 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       setLoading(true)
+      console.log('🚀 开始登录请求:', email)
+      
       const response = await api.post('/api/auth/login', { email, password })
       const { access_token } = response.data
+      console.log('✅ 登录API调用成功')
 
+      // 设置 token
       localStorage.setItem('token', access_token)
       setToken(access_token)
       
       // 获取用户信息
-      await fetchCurrentUser()
+      console.log('🚀 获取用户信息...')
+      const userResponse = await api.get('/api/users/me', {
+        headers: { Authorization: `Bearer ${access_token}` }
+      })
+      
+      console.log('✅ 用户信息获取成功:', userResponse.data.name || userResponse.data.email)
+      setUser(userResponse.data)
       
       message.success('登录成功！')
       return true
     } catch (error) {
-      console.error('登录失败:', error)
+      console.error('📛 登录失败:', error)
       message.error('登录失败，请检查邮箱和密码')
       return false
     } finally {
       setLoading(false)
+      console.log('🏁 登录流程结束')
     }
   }
 

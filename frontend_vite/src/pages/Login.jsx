@@ -17,16 +17,17 @@ export default function Login() {
 
   // 如果已经登录，直接跳转
   useEffect(() => {
-    if (user) {
-      navigate('/questions')
+    if (user && !loading) {
+      console.log('🎉 用户已登录，跳转到主页:', user.name || user.email)
+      navigate('/questions', { replace: true })
     }
-  }, [user, navigate])
+  }, [user, loading, navigate])
 
   const onFinish = async (values) => {
+    console.log('🔑 开始登录:', values.email)
     const success = await login(values.email, values.password)
-    if (success) {
-      navigate('/questions')
-    }
+    console.log('🔑 登录结果:', success)
+    // 不再在这里手动跳转，由 useEffect 监听 user 状态变化后自动跳转
   }
 
   const onFinishFailed = (errorInfo) => {
