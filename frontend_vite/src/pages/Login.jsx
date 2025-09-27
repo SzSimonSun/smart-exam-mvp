@@ -4,9 +4,16 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/auth'
 
 export default function Login() {
+  console.log('🔑 登录页面渲染')
+  
   const [form] = Form.useForm()
   const navigate = useNavigate()
   const { login, loading, user } = useAuth()
+  
+  console.log('🔑 登录页状态:', { 
+    loading, 
+    user: user?.name || '未登录' 
+  })
 
   // 如果已经登录，直接跳转
   useEffect(() => {

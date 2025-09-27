@@ -14,8 +14,15 @@ import IngestReview from './pages/IngestReview'
 // 受保护的路由组件
 const RequireAuth = ({ children }) => {
   const { user, loading } = useAuth()
+  
+  console.log('🔐 RequireAuth 状态:', { 
+    user: user?.name || '未登录', 
+    loading,
+    hasToken: !!localStorage.getItem('token')
+  })
 
   if (loading) {
+    console.log('🔄 显示加载状态')
     return (
       <div style={{ 
         display: 'flex', 
@@ -38,9 +45,11 @@ const RequireAuth = ({ children }) => {
   }
 
   if (!user) {
+    console.log('🚫 用户未登录，跳转到登录页')
     return <Navigate to="/login" replace />
   }
 
+  console.log('✅ 用户已登录，显示主应用')
   return children
 }
 
@@ -62,6 +71,8 @@ const MainApp = () => {
 }
 
 export default function App() {
+  console.log('🎯 App 组件渲染开始')
+  
   return (
     <ConfigProvider 
       locale={zhCN}
