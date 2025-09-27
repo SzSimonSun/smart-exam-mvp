@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>拆题数据测试</title>
+    <meta charset="UTF-8">
+</head>
+<body>
+    <h1>拆题数据测试</h1>
+    <div id="result"></div>
+    
+    <script>
+        // 测试拆题数据API调用
+        async function testIngestData() {
+            try {
+                const token = 'token_for_13_e64c7d89';
+                
+                // 获取会话列表
+                console.log('🔍 获取拆题会话列表...');
+                const sessionsResponse = await fetch('http://localhost:8000/api/ingest/sessions', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                const sessions = await sessionsResponse.json();
+                console.log('✅ 会话列表:', sessions);
+                
+                if (sessions.length > 0) {
+                    const sessionId = sessions[0].id;
+                    console.log(`🔍 获取会话 ${sessionId} 的拆题项目...`);
+                    
+                    // 获取拆题项目
+                    const itemsResponse = await fetch(`http://localhost:8000/api/ingest/sessions/${sessionId}/items`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    const items = await itemsResponse.json();
+                    console.log('✅ 拆题项目:', items);
+                    
+                    // 显示结果
+                    const resultDiv = document.getElementById('result');
+                    resultDiv.innerHTML = `
+                        <h2>拆题会话: ${sessions[0].name}</h2>
+                        <p>状态: ${sessions[0].status}</p>
+                        <p>总题目: ${sessions[0].total_items}</p>
+                        <h3>拆题项目 (共${items.length}个):</h3>
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${items.map(item => `
+                                <div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0;">
+                                    <strong>题目 ${item.seq}:</strong> ${item.question_text || '识别文本为空'}<br>
+                                    <em>类型: ${item.candidate_type}, 置信度: ${(item.confidence * 100).toFixed(1)}%, 状态: ${item.review_status}</em>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('result').innerHTML = '<p>❌ 没有找到拆题会话</p>';
+                }
+                
+            } catch (error) {
+                console.error('❌ 测试失败:', error);
+                document.getElementById('result').innerHTML = `<p>❌ 测试失败: ${error.message}</p>`;
+            }
+        }
+        
+        // 页面加载时执行测试
+        testIngestData();
+    </script>
+</body>
+</html>

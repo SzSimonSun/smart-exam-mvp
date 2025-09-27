@@ -5,7 +5,7 @@ import os
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite:///./test_exam.db"
+    database_url: str = "sqlite:////Users/sunfei/smart-exam-mvp/smart_exam.db"
     
     # Redis
     redis_url: str = "redis://redis:6379/0"

@@ -1,18 +1,46 @@
 """
-简化的文档处理服务
+智能文档处理服务
 处理PDF、DOCX、图片文件，将试卷拆分为单个题目
+集成真实的文档解析功能
 """
 
+import io
 import json
 import logging
 import uuid
 import re
-from typing import List, Dict, Any
+import tempfile
+from typing import List, Dict, Any, Optional
+from pathlib import Path
+
+# PDF处理
+try:
+    import PyPDF2
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
+    PyPDF2 = None
+
+# 图片处理
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    Image = None
+
+# DOCX处理 - 注意python-docx已经安装
+try:
+    from docx import Document
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+    Document = None
 
 logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
-    """文档处理器（简化版本）"""
+    """智能文档处理器 - 真实解析版本"""
     
     def __init__(self):
         self.supported_types = {
@@ -22,6 +50,7 @@ class DocumentProcessor:
             'image/jpg': self._process_image,
             'image/png': self._process_image,
         }
+        logger.info(f"文档处理器初始化 - PDF支持: {HAS_PDF}, DOCX支持: {HAS_DOCX}, 图片支持: {HAS_PIL}")
     
     def process_document(self, file_content: bytes, content_type: str, filename: str) -> Dict[str, Any]:
         """
@@ -63,10 +92,65 @@ class DocumentProcessor:
             }
     
     def _process_pdf(self, file_content: bytes, filename: str) -> Dict[str, Any]:
-        """处理PDF文件（简化版本）"""
+        """处理PDF文件 - 真实解析版本"""
+        if not HAS_PDF or PyPDF2 is None:
+            logger.warning("PyPDF2 未安装，使用模拟数据")
+            return self._process_pdf_fallback(filename)
+        
         try:
-            # 简化实现：直接使用模拟数据
-            mock_text = f"""
+            logger.info(f"开始处理PDF文件: {filename}, 大小: {len(file_content)} bytes")
+            
+            # 使用PyPDF2解析PDF
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
+            full_text = ""
+            page_count = len(pdf_reader.pages)
+            
+            logger.info(f"PDF共有 {page_count} 页")
+            
+            for i, page in enumerate(pdf_reader.pages):
+                try:
+                    page_text = page.extract_text()
+                    full_text += page_text + "\n"
+                    logger.debug(f"第{i+1}页提取文本: {len(page_text)} 字符")
+                except Exception as e:
+                    logger.warning(f"第{i+1}页文本提取失败: {e}")
+                    continue
+            
+            logger.info(f"PDF文本提取完成，总字符数: {len(full_text)}")
+            
+            if not full_text.strip():
+                logger.warning("PDF文本提取为空，可能是扫描版或加密PDF")
+                return {
+                    'success': False,
+                    'error': 'PDF文本提取为空，可能是图片扫描版或加密PDF',
+                    'items': []
+                }
+            
+            # 拆分题目
+            questions = self._split_text_into_questions(full_text)
+            
+            logger.info(f"PDF处理完成，识别到 {len(questions)} 道题目")
+            
+            return {
+                'success': True,
+                'file_type': 'pdf',
+                'total_pages': page_count,
+                'items': questions,
+                'extracted_text': full_text[:500] + '...' if len(full_text) > 500 else full_text,
+                'message': f'从 PDF 中提取了 {len(questions)} 道题目'
+            }
+            
+        except Exception as e:
+            logger.error(f"PDF处理失败: {e}")
+            return {
+                'success': False,
+                'error': f'PDF处理失败: {str(e)}',
+                'items': []
+            }
+    
+    def _process_pdf_fallback(self, filename: str) -> Dict[str, Any]:
+        """备用PDF处理（模拟数据）"""
+        mock_text = f"""
 1. 下列哪个数是质数？
 A. 4  B. 6  C. 7  D. 9
 
@@ -76,49 +160,70 @@ A. 4  B. 6  C. 7  D. 9
 
 4. 请简述三角形全等的判定方法。
 
-（注：这是从 PDF {filename} 模拟识别的内容）
-            """.strip()
-            
-            questions = self._split_text_into_questions(mock_text)
-            
-            return {
-                'success': True,
-                'file_type': 'pdf',
-                'total_pages': 1,
-                'items': questions,
-                'message': f'从 PDF 中提取了 {len(questions)} 道题目'
-            }
-            
-        except Exception as e:
-            logger.error(f"PDF处理失败: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'items': []
-            }
+（注：这是从 PDF {filename} 模拟识别的内容，因为PyPDF2未安装）
+        """.strip()
+        
+        questions = self._split_text_into_questions(mock_text)
+        
+        return {
+            'success': True,
+            'file_type': 'pdf',
+            'total_pages': 1,
+            'items': questions,
+            'message': f'从 PDF 中提取了 {len(questions)} 道题目（模拟数据）'
+        }
     
     def _process_docx(self, file_content: bytes, filename: str) -> Dict[str, Any]:
-        """处理DOCX文件（简化版本）"""
+        """处理DOCX文件 - 真实解析版本"""
+        if not HAS_DOCX:
+            logger.warning("python-docx 未安装，使用模拟数据")
+            return self._process_docx_fallback(filename)
+        
         try:
-            # 简化实现：直接使用模拟数据
-            mock_text = f"""
-1. 下列哪些是质数？（多选）
-A. 2  B. 4  C. 7  D. 9  E. 11
-
-2. 填空：一元二次方程 x² + 2x - 3 = 0 的解是 x = ______
-
-3. 论述题：请讨论二次函数的性质及其在实际生活中的应用。
-
-（注：这是从 DOCX {filename} 模拟识别的内容）
-            """.strip()
+            logger.info(f"开始处理DOCX文件: {filename}, 大小: {len(file_content)} bytes")
             
-            questions = self._split_text_into_questions(mock_text)
+            # 保存到临时文件
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp_file:
+                tmp_file.write(file_content)
+                tmp_file.flush()
+                
+                # 使用python-docx解析
+                doc = Document(tmp_file.name)
+                full_text = ""
+                paragraph_count = len(doc.paragraphs)
+                
+                logger.info(f"DOCX共有 {paragraph_count} 个段落")
+                
+                for i, paragraph in enumerate(doc.paragraphs):
+                    para_text = paragraph.text.strip()
+                    if para_text:  # 只添加非空段落
+                        full_text += para_text + "\n"
+                        logger.debug(f"段落{i+1}: {len(para_text)} 字符")
+            
+            # 清理临时文件
+            Path(tmp_file.name).unlink(missing_ok=True)
+            
+            logger.info(f"DOCX文本提取完成，总字符数: {len(full_text)}")
+            
+            if not full_text.strip():
+                logger.warning("DOCX文本提取为空")
+                return {
+                    'success': False,
+                    'error': '文档内容为空或无法读取文本',
+                    'items': []
+                }
+            
+            # 拆分题目
+            questions = self._split_text_into_questions(full_text)
+            
+            logger.info(f"DOCX处理完成，识别到 {len(questions)} 道题目")
             
             return {
                 'success': True,
                 'file_type': 'docx',
-                'total_paragraphs': 3,
+                'total_paragraphs': paragraph_count,
                 'items': questions,
+                'extracted_text': full_text[:500] + '...' if len(full_text) > 500 else full_text,
                 'message': f'从 DOCX 中提取了 {len(questions)} 道题目'
             }
             
@@ -126,9 +231,32 @@ A. 2  B. 4  C. 7  D. 9  E. 11
             logger.error(f"DOCX处理失败: {e}")
             return {
                 'success': False,
-                'error': str(e),
+                'error': f'DOCX处理失败: {str(e)}',
                 'items': []
             }
+    
+    def _process_docx_fallback(self, filename: str) -> Dict[str, Any]:
+        """备用DOCX处理（模拟数据）"""
+        mock_text = f"""
+1. 下列哪些是质数？（多选）
+A. 2  B. 4  C. 7  D. 9  E. 11
+
+2. 填空：一元二次方程 x² + 2x - 3 = 0 的解是 x = ______
+
+3. 论述题：请讨论二次函数的性质及其在实际生活中的应用。
+
+（注：这是从 DOCX {filename} 模拟识别的内容，因为python-docx未安装）
+        """.strip()
+        
+        questions = self._split_text_into_questions(mock_text)
+        
+        return {
+            'success': True,
+            'file_type': 'docx',
+            'total_paragraphs': 3,
+            'items': questions,
+            'message': f'从 DOCX 中提取了 {len(questions)} 道题目（模拟数据）'
+        }
     
     def _process_image(self, file_content: bytes, filename: str) -> Dict[str, Any]:
         """处理图片文件（简化版本）"""
@@ -165,44 +293,118 @@ A. 1  B. 3  C. 6  D. 7
             }
     
     def _split_text_into_questions(self, text: str) -> List[Dict[str, Any]]:
-        """将文本拆分为题目列表"""
+        """将文本拆分为题目列表 - 智能版本"""
+        logger.info(f"开始拆分文本，原始文本长度: {len(text)} 字符")
+        
         questions = []
         
-        # 按数字题号分割（如 1. 2. 3. 或 1、2、3、）
-        lines = text.split('\n')
-        current_question = []
-        question_pattern = re.compile(r'^\s*(\d+)[.、]\s*(.+)')
+        # 预处理文本：清理多余的空格和换行
+        text = re.sub(r'\s+', ' ', text.strip())
+        text = re.sub(r'\n\s*\n', '\n', text)
         
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            match = question_pattern.match(line)
-            if match:
-                # 保存前一个题目
-                if current_question:
-                    question_text = '\n'.join(current_question)
-                    if question_text.strip():
-                        questions.append(self._create_question_item(question_text, len(questions) + 1))
-                
-                # 开始新题目
-                current_question = [match.group(2)]
-            else:
-                if current_question:
-                    current_question.append(line)
+        # 多种题号格式匹配
+        question_patterns = [
+            r'\b(\d+)[.\u3001]\s*(.+?)(?=\b\d+[.\u3001]|$)',  # 1. 2. 或 1、2、
+            r'\b第(\d+)题[\s:]？*(.+?)(?=\b第\d+题|$)',  # 第1题 第2题
+            r'\b题目(\d+)[\s:]？*(.+?)(?=\b题目\d+|$)',  # 题目1 题目2
+            r'\b(\d+)\)\s*(.+?)(?=\b\d+\)|$)',  # 1) 2)
+            r'\b\((\d+)\)\s*(.+?)(?=\b\(\d+\)|$)',  # (1) (2)
+            r'^([A-Z])[\.\u3001]\s*(.+?)$',  # A. B. 格式（可能是选项）
+        ]
         
-        # 保存最后一个题目
-        if current_question:
-            question_text = '\n'.join(current_question)
-            if question_text.strip():
-                questions.append(self._create_question_item(question_text, len(questions) + 1))
+        best_matches = []
+        best_pattern_info = None
+        
+        for i, pattern in enumerate(question_patterns):
+            matches = re.findall(pattern, text, re.MULTILINE | re.DOTALL)
+            if matches and len(matches) > len(best_matches):
+                best_matches = matches
+                best_pattern_info = {
+                    'pattern_index': i,
+                    'pattern': pattern,
+                    'match_count': len(matches)
+                }
+        
+        if best_matches:
+            logger.info(f"使用模式 {best_pattern_info['pattern_index']} 找到 {len(best_matches)} 个匹配")
+            
+            for match in best_matches:
+                if len(match) >= 2:
+                    question_num = match[0]
+                    question_content = match[1].strip()
+                    
+                    if len(question_content) > 10:  # 过滤太短的内容
+                        question_item = self._create_question_item(question_content, len(questions) + 1)
+                        question_item['original_number'] = question_num
+                        questions.append(question_item)
         
         # 如果没有识别到题号格式，尝试其他分割方式
         if not questions:
+            logger.info("未识别到标准题号格式，尝试其他分割方式")
             questions = self._fallback_question_split(text)
         
+        # 进一步处理：合并太短的题目或分割太长的题目
+        questions = self._post_process_questions(questions)
+        
+        logger.info(f"最终识别到 {len(questions)} 道题目")
         return questions
+    
+    def _post_process_questions(self, questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """后处理题目列表"""
+        if not questions:
+            return questions
+        
+        processed_questions = []
+        
+        for question in questions:
+            question_text = question['question_text']
+            
+            # 如果题目太短(小于20字符)，可能是标题或无意义的内容
+            if len(question_text.strip()) < 20:
+                logger.debug(f"跳过太短的题目: {question_text[:50]}")
+                continue
+            
+            # 如果题目太长(大于1000字符)，尝试再次拆分
+            if len(question_text) > 1000:
+                logger.debug(f"题目太长，尝试再次拆分: {question_text[:100]}...")
+                sub_questions = self._split_long_question(question_text)
+                processed_questions.extend(sub_questions)
+            else:
+                processed_questions.append(question)
+        
+        # 重新编号
+        for i, question in enumerate(processed_questions):
+            question['seq'] = i + 1
+        
+        return processed_questions
+    
+    def _split_long_question(self, long_text: str) -> List[Dict[str, Any]]:
+        """拆分过长的题目"""
+        # 尝试按句号、问号或段落分割
+        sentences = re.split(r'[.!?。！？]\s*', long_text)
+        
+        sub_questions = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            
+            # 如果当前块加上这个句子仍然在合理范围内
+            if len(current_chunk + sentence) < 500:
+                current_chunk += sentence + ". "
+            else:
+                # 保存当前块
+                if current_chunk.strip():
+                    sub_questions.append(self._create_question_item(current_chunk.strip(), len(sub_questions) + 1))
+                current_chunk = sentence + ". "
+        
+        # 保存最后一块
+        if current_chunk.strip():
+            sub_questions.append(self._create_question_item(current_chunk.strip(), len(sub_questions) + 1))
+        
+        return sub_questions if sub_questions else [self._create_question_item(long_text, 1)]
     
     def _create_question_item(self, question_text: str, seq: int) -> Dict[str, Any]:
         """创建拆题项目"""

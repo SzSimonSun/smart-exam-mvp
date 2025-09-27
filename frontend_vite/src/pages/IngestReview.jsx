@@ -86,15 +86,51 @@ const IngestReview = () => {
     setEditModalVisible(true)
     // 解析OCR结果填充表单
     try {
-      const ocrData = typeof record.ocr_json === 'string' ? JSON.parse(record.ocr_json) : record.ocr_json
+      console.log('编辑项目详细信息:', {
+        record_id: record.id,
+        has_question_text: !!record.question_text,
+        question_text: record.question_text,
+        has_ocr_json: !!record.ocr_json,
+        ocr_json_type: typeof record.ocr_json,
+        ocr_json_content: record.ocr_json
+      })
+      
+      // 多重数据源获取题目文本
+      let questionText = ''
+      
+      // 首先尝试从后端直接返回的 question_text 获取
+      if (record.question_text) {
+        questionText = record.question_text
+        console.log('使用后端返回的 question_text:', questionText)
+      }
+      // 如果没有，尝试解析 ocr_json
+      else if (record.ocr_json) {
+        try {
+          const ocrData = typeof record.ocr_json === 'string' 
+            ? JSON.parse(record.ocr_json) 
+            : record.ocr_json
+          questionText = ocrData?.text || ''
+          console.log('从 OCR JSON 解析的文本:', questionText)
+          console.log('OCR 数据结构:', ocrData)
+        } catch (parseError) {
+          console.warn('解析OCR JSON失败:', parseError)
+          // 如果解析失败，尝试直接使用
+          questionText = typeof record.ocr_json === 'string' ? record.ocr_json : ''
+          console.log('解析失败，使用原始数据:', questionText)
+        }
+      }
+      
+      console.log('最终获取到的题目文本:', questionText)
+      
       editForm.setFieldsValue({
-        stem: ocrData?.text || record.question_text || '',
+        stem: questionText || '请输入题目内容',
         type: record.candidate_type || 'single',
         difficulty: 2
       })
     } catch (e) {
+      console.error('编辑数据处理异常:', e)
       editForm.setFieldsValue({
-        stem: record.question_text || '',
+        stem: '获取题目文本失败，请手动输入',
         type: record.candidate_type || 'single', 
         difficulty: 2
       })
@@ -158,13 +194,54 @@ const IngestReview = () => {
       key: 'question_text',
       width: 300,
       ellipsis: true,
-      render: (ocr_json) => {
+      render: (ocr_json, record) => {
         try {
-          const ocrData = typeof ocr_json === 'string' ? JSON.parse(ocr_json) : ocr_json
-          const text = ocrData?.text || '无内容'
-          return <Text ellipsis={{ tooltip: text }}>{text}</Text>
+          console.log('渲染项目详细信息:', {
+            record_id: record.id,
+            has_question_text: !!record.question_text,
+            question_text_preview: record.question_text ? record.question_text.substring(0, 50) : '无',
+            ocr_json_type: typeof ocr_json,
+            ocr_json_preview: ocr_json ? JSON.stringify(ocr_json).substring(0, 100) : '无'
+          })
+          
+          // 优先使用后端返回的 question_text
+          let text = record.question_text || ''
+          
+          // 如果后端的 question_text 是 "识别文本为空"，显示为提示信息
+          if (text === '识别文本为空') {
+            return <Text type="secondary" italic>{text}</Text>
+          }
+          
+          // 如果没有 question_text，尝试解析 ocr_json（备用方案）
+          if (!text && ocr_json) {
+            try {
+              if (typeof ocr_json === 'string') {
+                const ocrData = JSON.parse(ocr_json)
+                text = ocrData?.text || ''
+                console.log('从字符串OCR解析文本:', text)
+              } else if (typeof ocr_json === 'object') {
+                text = ocr_json?.text || ''
+                console.log('从对象OCR获取文本:', text)
+              }
+            } catch (parseError) {
+              console.warn('解析OCR JSON失败:', parseError)
+              text = ''
+            }
+          }
+          
+          // 最后的备用显示
+          const displayText = text || '识别文本为空'
+          console.log('最终显示文本:', displayText)
+          
+          // 根据内容类型设置样式
+          if (displayText === '识别文本为空') {
+            return <Text type="secondary" italic>{displayText}</Text>
+          } else {
+            return <Text ellipsis={{ tooltip: displayText }}>{displayText}</Text>
+          }
         } catch (e) {
-          return <Text ellipsis>解析失败</Text>
+          console.error('渲染项目失败:', e)
+          return <Text type="danger">解析失败</Text>
         }
       }
     },
@@ -414,9 +491,26 @@ const IngestReview = () => {
               <div style={{ marginTop: 8, padding: 16, backgroundColor: '#f5f5f5' }}>
                 {(() => {
                   try {
-                    const ocrData = typeof previewItem.ocr_json === 'string' ? JSON.parse(previewItem.ocr_json) : previewItem.ocr_json
-                    return ocrData?.text || '暂无内容'
+                    // 尝试从多个来源获取文本
+                    let text = ''
+                    
+                    if (previewItem.ocr_json) {
+                      if (typeof previewItem.ocr_json === 'string') {
+                        const ocrData = JSON.parse(previewItem.ocr_json)
+                        text = ocrData?.text || ''
+                      } else {
+                        text = previewItem.ocr_json?.text || ''
+                      }
+                    }
+                    
+                    // 如果 OCR 数据没有文本，尝试使用 question_text
+                    if (!text && previewItem.question_text) {
+                      text = previewItem.question_text
+                    }
+                    
+                    return text || '暂无内容'
                   } catch (e) {
+                    console.error('预览文本解析失败:', e)
                     return '解析失败'
                   }
                 })()}

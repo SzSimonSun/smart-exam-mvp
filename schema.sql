@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS ingest_items (
   seq INT,
   crop_uri TEXT,
   ocr_json JSONB,
+  question_text TEXT,  -- 新增：保存格式化后的题目文本
   candidate_type VARCHAR(20),
   candidate_kps_json JSONB,
   confidence NUMERIC(5,2),
