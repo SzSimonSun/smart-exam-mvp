@@ -1107,3 +1107,360 @@ def grading_result_callback(
         "message": "Grading results received and processing",
         "sheet_id": sheet_id
     }
+
+# 4. 拆题入库 API
+@app.get("/api/ingest/sessions")
+def get_ingest_sessions(
+    page: int = 1,
+    size: int = 20,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """获取拆题会话列表"""
+    from sqlalchemy import text
+    
+    query = """
+        SELECT id, session_id, name, status, created_at, total_items, processed_items
+        FROM ingest_sessions
+        WHERE created_by = :user_id
+        ORDER BY created_at DESC
+        LIMIT :size OFFSET :offset
+    """
+    params = {
+        "user_id": current_user["id"],
+        "size": size,
+        "offset": (page - 1) * size
+    }
+    
+    result = db.execute(text(query), params)
+    sessions = []
+    
+    for row in result:
+        sessions.append({
+            "id": row[0],
+            "session_id": row[1],
+            "name": row[2],
+            "status": row[3],
+            "created_at": str(row[4]) if row[4] else None,
+            "total_items": row[5] or 0,
+            "processed_items": row[6] or 0
+        })
+    
+    return sessions
+
+@app.post("/api/ingest/sessions")
+def create_ingest_session(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """创建拆题会话（上传文件）"""
+    from sqlalchemy import text
+    from datetime import datetime
+    import uuid
+    
+    # 生成文件URI（简化处理，实际应该保存到MinIO）
+    filename = file.filename or "unknown.pdf"
+    file_extension = filename.split('.')[-1] if '.' in filename else 'pdf'
+    session_id_str = str(uuid.uuid4())
+    
+    # 创建拆题会话
+    result = db.execute(
+        text("""
+            INSERT INTO ingest_sessions (session_id, name, created_by, status, created_at)
+            VALUES (:session_id, :name, :created_by, 'processing', :created_at)
+            RETURNING id, created_at
+        """),
+        {
+            "session_id": session_id_str,
+            "name": f"拆题会话 - {filename}",
+            "created_by": current_user["id"],
+            "created_at": datetime.utcnow()
+        }
+    )
+    
+    new_session = result.fetchone()
+    if not new_session:
+        raise HTTPException(status_code=500, detail="Failed to create ingest session")
+    
+    db_session_id = new_session[0]
+    
+    # TODO: 这里应该触发拆题任务到消息队列
+    # 现在先创建一些示例数据
+    sample_items = [
+        {
+            "question_text": "下列哪个选项是正确的？\nA. 选项A\nB. 选项B\nC. 选项C\nD. 选项D",
+            "question_type": "single_choice",
+            "correct_answer": "A",
+            "explanation": "这是一个示例题目的解析",
+            "knowledge_points_json": '["数学", "代数"]',
+            "confidence_score": 0.95
+        },
+        {
+            "question_text": "请计算以下表达式的值：2x + 3 = 7，求x的值。",
+            "question_type": "short_answer",
+            "correct_answer": "x = 2",
+            "explanation": "解方程：2x = 7 - 3 = 4，所以 x = 2",
+            "knowledge_points_json": '["数学", "方程"]',
+            "confidence_score": 0.88
+        },
+        {
+            "question_text": "多选题：以下哪些是质数？\nA. 2\nB. 4\nC. 7\nD. 9\nE. 11",
+            "question_type": "multiple_choice",
+            "correct_answer": "A,C,E",
+            "explanation": "质数是只能被1和自身整除的大于1的整数",
+            "knowledge_points_json": '["数学", "数论"]',
+            "confidence_score": 0.92
+        }
+    ]
+    
+    for item in sample_items:
+        db.execute(
+            text("""
+                INSERT INTO ingest_items (session_id, question_text, question_type, 
+                                         correct_answer, explanation, knowledge_points_json, 
+                                         confidence_score, status)
+                VALUES (:session_id, :question_text, :question_type, 
+                        :correct_answer, :explanation, :knowledge_points_json, 
+                        :confidence_score, 'pending')
+            """),
+            {
+                "session_id": session_id_str,
+                **item
+            }
+        )
+    
+    # 更新会话状态为等待审核
+    db.execute(
+        text("UPDATE ingest_sessions SET status = 'awaiting_review', total_items = 3, processed_items = 3 WHERE id = :id"),
+        {"id": db_session_id}
+    )
+    
+    db.commit()
+    
+    return {
+        "id": db_session_id,
+        "session_id": session_id_str,
+        "name": f"拆题会话 - {filename}",
+        "status": "awaiting_review",
+        "created_at": str(new_session[1]),
+        "total_items": 3,
+        "processed_items": 3,
+        "message": "拆题会话创建成功，已生成示例拆题项目"
+    }
+
+@app.get("/api/ingest/sessions/{session_id}")
+def get_ingest_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """获取拆题会话详情"""
+    from sqlalchemy import text
+    
+    result = db.execute(
+        text("""
+            SELECT id, uploader_id, file_uri, status, created_at
+            FROM ingest_sessions
+            WHERE id = :session_id AND uploader_id = :user_id
+        """),
+        {"session_id": session_id, "user_id": current_user["id"]}
+    )
+    
+    session = result.fetchone()
+    if not session:
+        raise HTTPException(status_code=404, detail="Ingest session not found")
+    
+    return {
+        "id": session[0],
+        "uploader_id": session[1],
+        "file_uri": session[2],
+        "status": session[3],
+        "created_at": str(session[4]) if session[4] else None
+    }
+
+@app.get("/api/ingest/sessions/{session_id}/items")
+def get_ingest_items(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """获取拆题项目列表"""
+    from sqlalchemy import text
+    
+    # 先验证会话权限
+    session_result = db.execute(
+        text("SELECT id FROM ingest_sessions WHERE id = :session_id AND uploader_id = :user_id"),
+        {"session_id": session_id, "user_id": current_user["id"]}
+    )
+    
+    if not session_result.fetchone():
+        raise HTTPException(status_code=404, detail="Ingest session not found")
+    
+    # 获取拆题项目
+    result = db.execute(
+        text("""
+            SELECT id, session_id, seq, crop_uri, ocr_json, 
+                   candidate_type, candidate_kps_json, confidence, review_status, approved_question_id
+            FROM ingest_items
+            WHERE session_id = :session_id
+            ORDER BY seq
+        """),
+        {"session_id": session_id}
+    )
+    
+    items = []
+    for row in result:
+        items.append({
+            "id": row[0],
+            "session_id": row[1],
+            "seq": row[2],
+            "crop_uri": row[3],
+            "ocr_json": row[4],
+            "candidate_type": row[5],
+            "candidate_kps_json": row[6],
+            "confidence": float(row[7]) if row[7] else None,
+            "review_status": row[8],
+            "approved_question_id": row[9]
+        })
+    
+    return items
+
+@app.post("/api/ingest/items/{item_id}/approve")
+def approve_ingest_item(
+    item_id: int,
+    approval_data: dict = {},
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """审核通过拆题项目"""
+    from sqlalchemy import text
+    from datetime import datetime
+    
+    # 验证拆题项目权限
+    result = db.execute(
+        text("""
+            SELECT ii.id, ii.ocr_json, ii.candidate_type, ii.candidate_kps_json
+            FROM ingest_items ii
+            JOIN ingest_sessions is ON ii.session_id = is.id
+            WHERE ii.id = :item_id AND is.uploader_id = :user_id
+        """),
+        {"item_id": item_id, "user_id": current_user["id"]}
+    )
+    
+    item = result.fetchone()
+    if not item:
+        raise HTTPException(status_code=404, detail="Ingest item not found")
+    
+    # 从OCR结果创建题目
+    import json
+    ocr_data = json.loads(item[1]) if item[1] else {}
+    question_text = approval_data.get("stem", ocr_data.get("text", "示例题目"))
+    
+    # 创建题目
+    question_result = db.execute(
+        text("""
+            INSERT INTO questions (stem, type, difficulty, status, created_by, created_at)
+            VALUES (:stem, :type, :difficulty, 'published', :created_by, :created_at)
+            RETURNING id
+        """),
+        {
+            "stem": question_text,
+            "type": approval_data.get("type", item[2] or "single_choice"),
+            "difficulty": approval_data.get("difficulty", 2),
+            "created_by": current_user["id"],
+            "created_at": datetime.utcnow()
+        }
+    )
+    
+    question_row = question_result.fetchone()
+    if not question_row:
+        raise HTTPException(status_code=500, detail="Failed to create question")
+    question_id = question_row[0]
+    
+    # 更新拆题项目状态
+    db.execute(
+        text("""
+            UPDATE ingest_items 
+            SET review_status = 'approved', approved_question_id = :question_id
+            WHERE id = :item_id
+        """),
+        {"item_id": item_id, "question_id": question_id}
+    )
+    
+    db.commit()
+    
+    return {
+        "message": "拆题项目审核通过",
+        "item_id": item_id,
+        "question_id": question_id
+    }
+
+@app.post("/api/ingest/items/{item_id}/reject")
+def reject_ingest_item(
+    item_id: int,
+    rejection_data: dict = {},
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """驳回拆题项目"""
+    from sqlalchemy import text
+    
+    # 验证拆题项目权限
+    result = db.execute(
+        text("""
+            SELECT ii.id
+            FROM ingest_items ii
+            JOIN ingest_sessions is ON ii.session_id = is.id
+            WHERE ii.id = :item_id AND is.uploader_id = :user_id
+        """),
+        {"item_id": item_id, "user_id": current_user["id"]}
+    )
+    
+    if not result.fetchone():
+        raise HTTPException(status_code=404, detail="Ingest item not found")
+    
+    # 更新拆题项目状态
+    db.execute(
+        text("UPDATE ingest_items SET review_status = 'rejected' WHERE id = :item_id"),
+        {"item_id": item_id}
+    )
+    
+    db.commit()
+    
+    return {
+        "message": "拆题项目已驳回",
+        "item_id": item_id,
+        "reason": rejection_data.get("reason", "未提供原因")
+    }
+
+@app.post("/api/ingest/sessions/{session_id}/complete")
+def complete_ingest_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """完成拆题会话"""
+    from sqlalchemy import text
+    
+    # 验证会话权限
+    result = db.execute(
+        text("SELECT id FROM ingest_sessions WHERE id = :session_id AND uploader_id = :user_id"),
+        {"session_id": session_id, "user_id": current_user["id"]}
+    )
+    
+    if not result.fetchone():
+        raise HTTPException(status_code=404, detail="Ingest session not found")
+    
+    # 更新会话状态
+    db.execute(
+        text("UPDATE ingest_sessions SET status = 'completed' WHERE id = :session_id"),
+        {"session_id": session_id}
+    )
+    
+    db.commit()
+    
+    return {
+        "message": "拆题会话已完成",
+        "session_id": session_id
+    }
