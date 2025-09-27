@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Table, Button, Space, Tag, Drawer, Form, Input, Select, InputNumber, message, Card, Row, Col, Divider } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, FileTextOutlined, UploadOutlined } from '@ant-design/icons'
 import { useQuestions } from '../hooks/useQuestions'
 import { useKnowledgePoints } from '../hooks/useKnowledgePoints'
 
@@ -8,6 +9,7 @@ const { Option } = Select
 const { TextArea } = Input
 
 export default function QuestionBank() {
+  const navigate = useNavigate()
   const [filters, setFilters] = useState({})
   const [drawerVisible, setDrawerVisible] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState(null)
@@ -165,9 +167,52 @@ export default function QuestionBank() {
           <h2>题库管理</h2>
         </Col>
         <Col>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => showDrawer()}>
-            新建题目
-          </Button>
+          <Space>
+            <Button 
+              icon={<UploadOutlined />} 
+              onClick={() => navigate('/questions/upload')}
+            >
+              试卷拆分
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => showDrawer()}>
+              新建题目
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      {/* 功能快捷入口 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Card 
+            hoverable 
+            onClick={() => showDrawer()}
+            style={{ textAlign: 'center', cursor: 'pointer' }}
+          >
+            <PlusOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+            <div style={{ marginTop: 8 }}>手动新建题目</div>
+            <div style={{ color: '#666', fontSize: '12px' }}>创建单个题目并添加到题库</div>
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card 
+            hoverable 
+            onClick={() => navigate('/questions/upload')}
+            style={{ textAlign: 'center', cursor: 'pointer' }}
+          >
+            <FileTextOutlined style={{ fontSize: '24px', color: '#52c41a' }} />
+            <div style={{ marginTop: 8 }}>试卷拆分入库</div>
+            <div style={{ color: '#666', fontSize: '12px' }}>上传试卷PDF自动拆分成题目</div>
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#1890ff' }}>
+              {questions.length}
+            </div>
+            <div>题库总题数</div>
+            <div style={{ color: '#666', fontSize: '12px' }}>当前筛选条件下的题目数量</div>
+          </Card>
         </Col>
       </Row>
 

@@ -4,7 +4,7 @@ import { message, notification } from 'antd'
 // 创建axios实例
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8000',
-  timeout: 10000,
+  timeout: 30000, // 增加超时时间到30秒，特别是对于文件上传
   headers: {
     'Content-Type': 'application/json',
   },
@@ -95,11 +95,21 @@ api.interceptors.response.use(
       }
     } else if (error.request) {
       // 请求已发出但没有收到响应
-      notification.error({
-        message: '网络连接失败',
-        description: '无法连接到服务器，请检查网络连接或稍后再试',
-        duration: 8
-      })
+      console.error('Network Error:', error.request)
+      
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        notification.error({
+          message: '请求超时',
+          description: '服务器响应过慢，请稍后再试',
+          duration: 8
+        })
+      } else {
+        notification.error({
+          message: '网络连接失败',
+          description: '无法连接到服务器，请检查网络连接或稍后再试',
+          duration: 8
+        })
+      }
     } else {
       // 请求配置出错
       message.error('请求配置错误')

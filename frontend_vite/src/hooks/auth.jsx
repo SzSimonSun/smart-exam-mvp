@@ -17,7 +17,32 @@ export const AuthProvider = ({ children }) => {
     initialized: isInitialized 
   })
 
-  // 获取当前用户信息
+  // 重试函数
+  const retryWithDelay = async (fn, maxRetries = 3, delay = 1000) => {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await fn()
+      } catch (error) {
+        // 检查是否是网络连接错误或临时性错误
+        const isRetryableError = 
+          error.code === 'ECONNABORTED' ||
+          error.message.includes('timeout') ||
+          error.message.includes('message port closed') ||
+          error.message.includes('Network Error') ||
+          !error.response // 没有响应表示网络问题
+        
+        if (i === maxRetries - 1 || !isRetryableError) {
+          throw error // 最后一次重试或非网络错误，抛出异常
+        }
+        
+        console.log(`🔄 网络请求失败，${delay}ms后进行第${i + 2}次重试...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        delay *= 1.5 // 指数退避
+      }
+    }
+  }
+
+  // 获取当前用户信息（支持重试）
   const fetchCurrentUser = async () => {
     if (!token) {
       setLoading(false)
@@ -25,27 +50,36 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
-      const response = await api.get('/api/users/me')
+      const response = await retryWithDelay(() => api.get('/api/users/me'))
       console.log('✅ 用户登录成功:', response.data.name || response.data.email)
       setUser(response.data)
     } catch (error) {
       console.error('获取用户信息失败:', error.message)
-      // Token无效，清除本地存储
-      localStorage.removeItem('token')
-      setToken(null)
-      setUser(null)
+      
+      // 只有在401（认证失败）时才清除token，网络错误不清除
+      if (error.response && error.response.status === 401) {
+        localStorage.removeItem('token')
+        setToken(null)
+        setUser(null)
+      } else {
+        // 网络错误时显示友好提示
+        message.error('网络连接失败，请检查网络后刷新页面')
+      }
     } finally {
       setLoading(false)
     }
   }
 
-  // 登录
+  // 登录（支持重试）
   const login = async (email, password) => {
     try {
       setLoading(true)
       console.log('🚀 开始登录请求:', email)
       
-      const response = await api.post('/api/auth/login', { email, password })
+      // 登录请求支持重试
+      const response = await retryWithDelay(() => 
+        api.post('/api/auth/login', { email, password })
+      )
       const { access_token } = response.data
       console.log('✅ 登录API调用成功')
 
@@ -53,11 +87,13 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', access_token)
       setToken(access_token)
       
-      // 获取用户信息
+      // 获取用户信息（支持重试）
       console.log('🚀 获取用户信息...')
-      const userResponse = await api.get('/api/users/me', {
-        headers: { Authorization: `Bearer ${access_token}` }
-      })
+      const userResponse = await retryWithDelay(() => 
+        api.get('/api/users/me', {
+          headers: { Authorization: `Bearer ${access_token}` }
+        })
+      )
       
       console.log('✅ 用户信息获取成功:', userResponse.data.name || userResponse.data.email)
       setUser(userResponse.data)
@@ -66,7 +102,15 @@ export const AuthProvider = ({ children }) => {
       return true
     } catch (error) {
       console.error('📛 登录失败:', error)
-      message.error('登录失败，请检查邮箱和密码')
+      
+      // 区分网络错误和认证错误
+      if (error.response && error.response.status === 401) {
+        message.error('邮箱或密码错误')
+      } else if (!error.response || error.code === 'ECONNABORTED') {
+        message.error('网络连接失败，请检查网络连接后重试')
+      } else {
+        message.error('登录失败，请稍后重试')
+      }
       return false
     } finally {
       setLoading(false)

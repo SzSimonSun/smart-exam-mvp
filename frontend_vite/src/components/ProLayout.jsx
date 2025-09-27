@@ -27,6 +27,18 @@ const SmartExamProLayout = ({ children }) => {
       key: '/questions',
       name: '题库管理',
       icon: <BookOutlined />,
+      children: [
+        {
+          path: '/questions',
+          key: '/questions',
+          name: '题库列表',
+        },
+        {
+          path: '/questions/upload',
+          key: '/questions/upload',
+          name: '试卷拆分',
+        },
+      ],
     },
     {
       path: '/paper',

@@ -110,10 +110,11 @@ export const useUpload = () => {
     })
 
     try {
-      const response = await api.post('/api/ingest/upload', formData, {
+      const response = await api.post('/api/ingest/sessions', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
+        timeout: 60000, // 文件上传设置60秒超时
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round(
             (progressEvent.loaded * 100) / progressEvent.total

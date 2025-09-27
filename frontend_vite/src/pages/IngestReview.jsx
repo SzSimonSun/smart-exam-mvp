@@ -10,39 +10,32 @@ import {
   Form,
   message,
   Typography,
+  Select,
+  Descriptions,
+  Popconfirm,
   Row,
   Col,
-  Tabs,
-  Select,
-  Image,
-  Descriptions,
-  Checkbox,
-  Popconfirm,
-  Drawer
+  Statistic
 } from 'antd'
 import {
   SearchOutlined,
   CheckOutlined,
   CloseOutlined,
-  EditOutlined,
   EyeOutlined,
-  FileImageOutlined,
-  ExclamationCircleOutlined
+  EditOutlined
 } from '@ant-design/icons'
 import { useIngestSession, useIngest } from '../hooks/useIngest'
 
 const { Title, Text } = Typography
-const { TabPane } = Tabs
 
 const IngestReview = () => {
   const [sessionId, setSessionId] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState([])
   const [previewItem, setPreviewItem] = useState(null)
-  const [editItem, setEditItem] = useState(null)
-  const [editDrawerVisible, setEditDrawerVisible] = useState(false)
-  const [rejectModalVisible, setRejectModalVisible] = useState(false)
-  const [rejectForm] = Form.useForm()
+  const [editModalVisible, setEditModalVisible] = useState(false)
+  const [editingItem, setEditingItem] = useState(null)
   const [searchForm] = Form.useForm()
+  const [editForm] = Form.useForm()
 
   // 使用Hook
   const {
@@ -52,12 +45,10 @@ const IngestReview = () => {
     approveIngestItem,
     rejectIngestItem,
     batchApprove,
-    batchReject,
-    editIngestItem,
-    completeIngestSession
+    batchReject
   } = useIngestSession(sessionId)
 
-  const { ingestSessions } = useIngest()
+  const { sessions: ingestSessions } = useIngest()
 
   // 搜索会话
   const handleSearch = () => {
@@ -73,28 +64,60 @@ const IngestReview = () => {
   const handleApprove = async (record) => {
     try {
       await approveIngestItem(record.id)
+      message.success('审核通过！')
     } catch (error) {
-      // Hook中已处理错误
+      console.error('审核失败:', error)
     }
   }
 
   // 单项驳回
-  const handleReject = (record) => {
-    setEditItem(record)
-    setRejectModalVisible(true)
+  const handleReject = async (record) => {
+    try {
+      await rejectIngestItem(record.id, { reason: '手动驳回' })
+      message.success('已驳回！')
+    } catch (error) {
+      console.error('驳回失败:', error)
+    }
   }
 
-  // 确认驳回
-  const handleConfirmReject = async () => {
+  // 编辑题目
+  const handleEdit = (record) => {
+    setEditingItem(record)
+    setEditModalVisible(true)
+    // 解析OCR结果填充表单
     try {
-      const values = await rejectForm.validateFields()
-      await rejectIngestItem(editItem.id, { reason: values.reason })
-      setRejectModalVisible(false)
-      rejectForm.resetFields()
-      setEditItem(null)
-    } catch (error) {
-      // Hook中已处理错误
+      const ocrData = typeof record.ocr_json === 'string' ? JSON.parse(record.ocr_json) : record.ocr_json
+      editForm.setFieldsValue({
+        stem: ocrData?.text || record.question_text || '',
+        type: record.candidate_type || 'single',
+        difficulty: 2
+      })
+    } catch (e) {
+      editForm.setFieldsValue({
+        stem: record.question_text || '',
+        type: record.candidate_type || 'single', 
+        difficulty: 2
+      })
     }
+  }
+
+  // 保存编辑
+  const handleSaveEdit = async () => {
+    try {
+      const values = await editForm.validateFields()
+      await approveIngestItem(editingItem.id, values)
+      setEditModalVisible(false)
+      setEditingItem(null)
+      editForm.resetFields()
+      message.success('题目已成功添加到题库！')
+    } catch (error) {
+      console.error('保存失败:', error)
+    }
+  }
+
+  // 预览项目
+  const handlePreview = (record) => {
+    setPreviewItem(record)
   }
 
   // 批量审核通过
@@ -103,181 +126,126 @@ const IngestReview = () => {
       message.warning('请选择要审核的项目')
       return
     }
-    
     try {
       await batchApprove(selectedRowKeys)
       setSelectedRowKeys([])
+      message.success(`批量审核通过 ${selectedRowKeys.length} 个项目！`)
     } catch (error) {
-      // Hook中已处理错误
+      console.error('批量审核失败:', error)
     }
   }
 
   // 批量驳回
-  const handleBatchReject = () => {
+  const handleBatchReject = async () => {
     if (selectedRowKeys.length === 0) {
       message.warning('请选择要驳回的项目')
       return
     }
-    setRejectModalVisible(true)
-  }
-
-  // 确认批量驳回
-  const handleConfirmBatchReject = async () => {
     try {
-      const values = await rejectForm.validateFields()
-      await batchReject(selectedRowKeys, { reason: values.reason })
-      setRejectModalVisible(false)
-      rejectForm.resetFields()
+      await batchReject(selectedRowKeys, { reason: '批量驳回' })
       setSelectedRowKeys([])
+      message.success(`批量驳回 ${selectedRowKeys.length} 个项目！`)
     } catch (error) {
-      // Hook中已处理错误
+      console.error('批量驳回失败:', error)
     }
-  }
-
-  // 编辑项目
-  const handleEdit = (record) => {
-    setEditItem(record)
-    setEditDrawerVisible(true)
-  }
-
-  // 预览项目
-  const handlePreview = (record) => {
-    setPreviewItem(record)
-  }
-
-  // 完成拆题会话
-  const handleCompleteSession = async () => {
-    Modal.confirm({
-      title: '确认完成拆题会话？',
-      content: '完成后将无法继续审核，请确认所有项目都已处理完毕。',
-      onOk: async () => {
-        try {
-          await completeIngestSession()
-        } catch (error) {
-          // Hook中已处理错误
-        }
-      }
-    })
   }
 
   // 表格列定义
   const columns = [
     {
       title: '题目内容',
-      dataIndex: 'question_text',
+      dataIndex: 'ocr_json',
       key: 'question_text',
       width: 300,
       ellipsis: true,
-      render: (text, record) => (
-        <div>
-          <Text ellipsis={{ tooltip: text }}>{text}</Text>
-          {record.question_image && (
-            <div style={{ marginTop: 4 }}>
-              <FileImageOutlined style={{ color: '#1890ff' }} />
-              <Text type="secondary"> 包含图片</Text>
-            </div>
-          )}
-        </div>
-      )
-    },
-    {
-      title: '题目类型',
-      dataIndex: 'question_type',
-      key: 'question_type',
-      width: 100,
-      render: (type) => {
-        const typeMap = {
-          'single_choice': '单选题',
-          'multiple_choice': '多选题',
-          'fill_blank': '填空题',
-          'subjective': '主观题'
+      render: (ocr_json) => {
+        try {
+          const ocrData = typeof ocr_json === 'string' ? JSON.parse(ocr_json) : ocr_json
+          const text = ocrData?.text || '无内容'
+          return <Text ellipsis={{ tooltip: text }}>{text}</Text>
+        } catch (e) {
+          return <Text ellipsis>解析失败</Text>
         }
-        return <Tag>{typeMap[type] || type}</Tag>
       }
     },
     {
-      title: '知识点',
-      dataIndex: 'knowledge_points',
-      key: 'knowledge_points',
-      width: 150,
-      render: (points) => (
-        <div>
-          {points?.map(point => (
-            <Tag key={point.id} size="small">{point.name}</Tag>
-          ))}
-        </div>
-      )
+      title: '题目类型',
+      dataIndex: 'candidate_type',
+      key: 'candidate_type',
+      width: 100,
+      render: (type) => {
+        const typeMap = {
+          'single': '单选题',
+          'multiple': '多选题',
+          'fill': '填空题',
+          'judge': '判断题',
+          'subjective': '主观题'
+        }
+        return <Tag>{typeMap[type] || '未知'}</Tag>
+      }
     },
     {
-      title: '难度',
-      dataIndex: 'difficulty',
-      key: 'difficulty',
-      width: 80,
-      render: (difficulty) => {
-        const color = {
-          'easy': 'green',
-          'medium': 'orange', 
-          'hard': 'red'
-        }[difficulty]
-        const text = {
-          'easy': '简单',
-          'medium': '中等',
-          'hard': '困难'
-        }[difficulty]
-        return <Tag color={color}>{text}</Tag>
+      title: '置信度',
+      dataIndex: 'confidence',
+      key: 'confidence',
+      width: 100,
+      render: (confidence) => {
+        if (!confidence) return '-'
+        const percent = (confidence * 100).toFixed(1)
+        const color = confidence > 0.8 ? 'green' : confidence > 0.6 ? 'orange' : 'red'
+        return <Tag color={color}>{percent}%</Tag>
       }
     },
     {
       title: '状态',
-      dataIndex: 'status',
-      key: 'status',
+      dataIndex: 'review_status',
+      key: 'review_status',
       width: 100,
       render: (status) => {
         const statusMap = {
-          'pending': { color: 'processing', text: '待审核' },
-          'approved': { color: 'success', text: '已通过' },
-          'rejected': { color: 'error', text: '已驳回' }
+          'pending': { color: 'orange', text: '待审核' },
+          'approved': { color: 'green', text: '已通过' },
+          'rejected': { color: 'red', text: '已驳回' }
         }
-        const statusInfo = statusMap[status] || { color: 'default', text: status }
+        const statusInfo = statusMap[status] || { color: 'default', text: status || '未知' }
         return <Tag color={statusInfo.color}>{statusInfo.text}</Tag>
       }
     },
     {
       title: '操作',
-      key: 'action',
+      key: 'actions',
       width: 200,
       render: (_, record) => (
-        <Space size="small">
+        <Space>
           <Button
-            type="link"
+            size="small"
             icon={<EyeOutlined />}
             onClick={() => handlePreview(record)}
           >
             预览
           </Button>
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
-            disabled={record.status === 'approved'}
-          >
-            编辑
-          </Button>
-          {record.status === 'pending' && (
+          {record.review_status === 'pending' && (
             <>
               <Button
-                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
+              >
+                编辑
+              </Button>
+              <Button
+                size="small"
+                type="primary"
                 icon={<CheckOutlined />}
                 onClick={() => handleApprove(record)}
-                style={{ color: '#52c41a' }}
               >
                 通过
               </Button>
               <Button
-                type="link"
+                size="small"
+                danger
                 icon={<CloseOutlined />}
                 onClick={() => handleReject(record)}
-                style={{ color: '#ff4d4f' }}
               >
                 驳回
               </Button>
@@ -292,7 +260,7 @@ const IngestReview = () => {
     selectedRowKeys,
     onChange: setSelectedRowKeys,
     getCheckboxProps: (record) => ({
-      disabled: record.status === 'approved'
+      disabled: record.review_status === 'approved' || record.review_status === 'rejected',
     })
   }
 
@@ -322,7 +290,7 @@ const IngestReview = () => {
         </Form>
 
         {/* 快速选择会话 */}
-        {ingestSessions.length > 0 && (
+        {ingestSessions && ingestSessions.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <Text strong>快速选择：</Text>
             <Select
@@ -352,49 +320,52 @@ const IngestReview = () => {
                 {session.status === 'completed' ? '已完成' : '进行中'}
               </Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="创建时间">{session.created_at}</Descriptions.Item>
-            <Descriptions.Item label="总项目数">{ingestItems.length}</Descriptions.Item>
+            <Descriptions.Item label="创建时间">{session.created_at || '未知'}</Descriptions.Item>
+            <Descriptions.Item label="总项目数">{ingestItems ? ingestItems.length : 0}</Descriptions.Item>
             <Descriptions.Item label="待审核">
-              {ingestItems.filter(item => item.status === 'pending').length}
+              {ingestItems ? ingestItems.filter(item => item.review_status === 'pending').length : 0}
             </Descriptions.Item>
           </Descriptions>
           
-          {session.status !== 'completed' && (
-            <div style={{ marginTop: 16 }}>
-              <Popconfirm
-                title="确认完成拆题会话？"
-                description="完成后将无法继续审核"
-                onConfirm={handleCompleteSession}
-              >
-                <Button type="primary" danger>
-                  完成拆题会话
-                </Button>
-              </Popconfirm>
-            </div>
-          )}
+          {/* 统计信息 */}
+          <Row gutter={16} style={{ marginTop: 16 }}>
+            <Col span={6}>
+              <Statistic title="待审核" value={ingestItems ? ingestItems.filter(item => item.review_status === 'pending').length : 0} valueStyle={{ color: '#faad14' }} />
+            </Col>
+            <Col span={6}>
+              <Statistic title="已通过" value={ingestItems ? ingestItems.filter(item => item.review_status === 'approved').length : 0} valueStyle={{ color: '#52c41a' }} />
+            </Col>
+            <Col span={6}>
+              <Statistic title="已驳回" value={ingestItems ? ingestItems.filter(item => item.review_status === 'rejected').length : 0} valueStyle={{ color: '#ff7875' }} />
+            </Col>
+            <Col span={6}>
+              <Statistic title="总项目" value={ingestItems ? ingestItems.length : 0} />
+            </Col>
+          </Row>
         </Card>
       )}
 
       {/* 批量操作 */}
-      {ingestItems.length > 0 && (
+      {selectedRowKeys.length > 0 && (
         <Card style={{ marginBottom: 16 }}>
           <Space>
-            <Text>已选择 {selectedRowKeys.length} 项</Text>
-            <Button
-              type="primary"
-              icon={<CheckOutlined />}
-              onClick={handleBatchApprove}
-              disabled={selectedRowKeys.length === 0}
+            <Text>已选择 {selectedRowKeys.length} 个项目</Text>
+            <Popconfirm
+              title="确认批量审核通过选中的项目吗？"
+              onConfirm={handleBatchApprove}
             >
-              批量通过
-            </Button>
-            <Button
-              icon={<CloseOutlined />}
-              onClick={handleBatchReject}
-              disabled={selectedRowKeys.length === 0}
+              <Button type="primary" icon={<CheckOutlined />}>
+                批量通过
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              title="确认批量驳回选中的项目吗？"
+              onConfirm={handleBatchReject}
             >
-              批量驳回
-            </Button>
+              <Button danger icon={<CloseOutlined />}>
+                批量驳回
+              </Button>
+            </Popconfirm>
           </Space>
         </Card>
       )}
@@ -404,11 +375,11 @@ const IngestReview = () => {
         <Table
           rowSelection={rowSelection}
           columns={columns}
-          dataSource={ingestItems}
+          dataSource={ingestItems || []}
           loading={loading}
           rowKey="id"
           pagination={{
-            total: ingestItems.length,
+            total: ingestItems ? ingestItems.length : 0,
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total) => `共 ${total} 条`
@@ -428,87 +399,86 @@ const IngestReview = () => {
           <div>
             <Descriptions column={2}>
               <Descriptions.Item label="题目类型">
-                {previewItem.question_type}
+                {previewItem.candidate_type}
               </Descriptions.Item>
-              <Descriptions.Item label="难度">
-                {previewItem.difficulty}
+              <Descriptions.Item label="状态">
+                {previewItem.review_status}
+              </Descriptions.Item>
+              <Descriptions.Item label="置信度">
+                {previewItem.confidence ? (previewItem.confidence * 100).toFixed(1) + '%' : '-'}
               </Descriptions.Item>
             </Descriptions>
             
             <div style={{ marginTop: 16 }}>
               <Text strong>题目内容：</Text>
               <div style={{ marginTop: 8, padding: 16, backgroundColor: '#f5f5f5' }}>
-                {previewItem.question_text}
+                {(() => {
+                  try {
+                    const ocrData = typeof previewItem.ocr_json === 'string' ? JSON.parse(previewItem.ocr_json) : previewItem.ocr_json
+                    return ocrData?.text || '暂无内容'
+                  } catch (e) {
+                    return '解析失败'
+                  }
+                })()}
               </div>
             </div>
-
-            {previewItem.question_image && (
-              <div style={{ marginTop: 16 }}>
-                <Text strong>题目图片：</Text>
-                <div style={{ marginTop: 8 }}>
-                  <Image
-                    src={previewItem.question_image}
-                    alt="题目图片"
-                    style={{ maxWidth: '100%' }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {previewItem.options && previewItem.options.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <Text strong>选项：</Text>
-                <div style={{ marginTop: 8 }}>
-                  {previewItem.options.map((option, index) => (
-                    <div key={index} style={{ marginBottom: 8 }}>
-                      <Text>{String.fromCharCode(65 + index)}. {option}</Text>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginTop: 16 }}>
-              <Text strong>正确答案：</Text>
-              <div style={{ marginTop: 8 }}>
-                <Text code>{previewItem.correct_answer}</Text>
-              </div>
-            </div>
-
-            {previewItem.explanation && (
-              <div style={{ marginTop: 16 }}>
-                <Text strong>解析：</Text>
-                <div style={{ marginTop: 8, padding: 16, backgroundColor: '#f5f5f5' }}>
-                  {previewItem.explanation}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </Modal>
 
-      {/* 驳回原因弹窗 */}
+      {/* 编辑弹窗 */}
       <Modal
-        title={editItem ? "驳回原因" : "批量驳回原因"}
-        open={rejectModalVisible}
-        onOk={editItem ? handleConfirmReject : handleConfirmBatchReject}
+        title="编辑题目"
+        open={editModalVisible}
+        onOk={handleSaveEdit}
         onCancel={() => {
-          setRejectModalVisible(false)
-          rejectForm.resetFields()
-          setEditItem(null)
+          setEditModalVisible(false)
+          setEditingItem(null)
+          editForm.resetFields()
         }}
+        width={800}
       >
-        <Form form={rejectForm}>
+        <Form form={editForm} layout="vertical">
           <Form.Item
-            name="reason"
-            label="驳回原因"
-            rules={[{ required: true, message: '请输入驳回原因' }]}
+            name="stem"
+            label="题目内容"
+            rules={[{ required: true, message: '请输入题目内容' }]}
           >
-            <Input.TextArea
-              rows={4}
-              placeholder="请输入驳回原因..."
-            />
+            <Input.TextArea rows={4} placeholder="请输入题目内容" />
           </Form.Item>
+          
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="type"
+                label="题目类型"
+                rules={[{ required: true, message: '请选择题目类型' }]}
+              >
+                <Select placeholder="请选择题目类型">
+                  <Select.Option value="single">单选题</Select.Option>
+                  <Select.Option value="multiple">多选题</Select.Option>
+                  <Select.Option value="fill">填空题</Select.Option>
+                  <Select.Option value="judge">判断题</Select.Option>
+                  <Select.Option value="subjective">主观题</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="difficulty"
+                label="难度等级"
+                rules={[{ required: true, message: '请选择难度等级' }]}
+              >
+                <Select placeholder="请选择难度等级">
+                  <Select.Option value={1}>1星 (很简单)</Select.Option>
+                  <Select.Option value={2}>2星 (简单)</Select.Option>
+                  <Select.Option value={3}>3星 (中等)</Select.Option>
+                  <Select.Option value={4}>4星 (困难)</Select.Option>
+                  <Select.Option value={5}>5星 (很困难)</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
     </div>

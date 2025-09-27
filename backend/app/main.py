@@ -1149,7 +1149,7 @@ def get_ingest_sessions(
     return sessions
 
 @app.post("/api/ingest/sessions")
-def create_ingest_session(
+async def create_ingest_session(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -1158,6 +1158,21 @@ def create_ingest_session(
     from sqlalchemy import text
     from datetime import datetime
     import uuid
+    
+    # 验证文件类型
+    allowed_types = {
+        'application/pdf',
+        'image/jpeg',
+        'image/jpg', 
+        'image/png',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'  # DOCX
+    }
+    
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"不支持的文件类型: {file.content_type}。只支持PDF、图片和DOCX格式。"
+        )
     
     # 生成文件URI（简化处理，实际应该保存到MinIO）
     filename = file.filename or "unknown.pdf"
@@ -1186,68 +1201,85 @@ def create_ingest_session(
     db_session_id = new_session[0]
     
     # TODO: 这里应该触发拆题任务到消息队列
-    # 现在先创建一些示例数据
-    sample_items = [
-        {
-            "question_text": "下列哪个选项是正确的？\nA. 选项A\nB. 选项B\nC. 选项C\nD. 选项D",
-            "question_type": "single_choice",
-            "correct_answer": "A",
-            "explanation": "这是一个示例题目的解析",
-            "knowledge_points_json": '["数学", "代数"]',
-            "confidence_score": 0.95
-        },
-        {
-            "question_text": "请计算以下表达式的值：2x + 3 = 7，求x的值。",
-            "question_type": "short_answer",
-            "correct_answer": "x = 2",
-            "explanation": "解方程：2x = 7 - 3 = 4，所以 x = 2",
-            "knowledge_points_json": '["数学", "方程"]',
-            "confidence_score": 0.88
-        },
-        {
-            "question_text": "多选题：以下哪些是质数？\nA. 2\nB. 4\nC. 7\nD. 9\nE. 11",
-            "question_type": "multiple_choice",
-            "correct_answer": "A,C,E",
-            "explanation": "质数是只能被1和自身整除的大于1的整数",
-            "knowledge_points_json": '["数学", "数论"]',
-            "confidence_score": 0.92
-        }
-    ]
-    
-    for item in sample_items:
+    # 现在先使用文档处理器处理文件
+    try:
+        # 读取文件内容
+        file_content = await file.read()
+        
+        # 使用文档处理器
+        from app.services.simple_document_processor import DocumentProcessor
+        processor = DocumentProcessor()
+        process_result = processor.process_document(file_content, file.content_type, filename)
+        
+        if not process_result['success']:
+            # 更新会话状态为失败
+            db.execute(
+                text("UPDATE ingest_sessions SET status = 'failed' WHERE id = :id"),
+                {"id": db_session_id}
+            )
+            db.commit()
+            
+            raise HTTPException(
+                status_code=400, 
+                detail=f"文档处理失败: {process_result.get('error', '未知错误')}"
+            )
+        
+        # 保存拆题项目
+        import json
+        for item in process_result['items']:
+            db.execute(
+                text("""
+                    INSERT INTO ingest_items (session_id, seq, ocr_json, candidate_type, 
+                                             candidate_kps_json, confidence, review_status)
+                    VALUES (:session_id, :seq, :ocr_json, :candidate_type, 
+                           :candidate_kps_json, :confidence, 'pending')
+                """),
+                {
+                    "session_id": db_session_id,
+                    "seq": item["seq"],
+                    "ocr_json": json.dumps(item["ocr_result"]),
+                    "candidate_type": item["question_type"],
+                    "candidate_kps_json": json.dumps(item["candidate_kps"]),
+                    "confidence": item["confidence"]
+                }
+            )
+        
+        # 更新会话状态
+        total_items = len(process_result['items'])
         db.execute(
             text("""
-                INSERT INTO ingest_items (session_id, question_text, question_type, 
-                                         correct_answer, explanation, knowledge_points_json, 
-                                         confidence_score, status)
-                VALUES (:session_id, :question_text, :question_type, 
-                        :correct_answer, :explanation, :knowledge_points_json, 
-                        :confidence_score, 'pending')
+                UPDATE ingest_sessions 
+                SET status = 'awaiting_review', total_items = :total, processed_items = :processed 
+                WHERE id = :id
             """),
-            {
-                "session_id": session_id_str,
-                **item
-            }
+            {"id": db_session_id, "total": total_items, "processed": total_items}
         )
-    
-    # 更新会话状态为等待审核
-    db.execute(
-        text("UPDATE ingest_sessions SET status = 'awaiting_review', total_items = 3, processed_items = 3 WHERE id = :id"),
-        {"id": db_session_id}
-    )
-    
-    db.commit()
-    
-    return {
-        "id": db_session_id,
-        "session_id": session_id_str,
-        "name": f"拆题会话 - {filename}",
-        "status": "awaiting_review",
-        "created_at": str(new_session[1]),
-        "total_items": 3,
-        "processed_items": 3,
-        "message": "拆题会话创建成功，已生成示例拆题项目"
-    }
+        
+        db.commit()
+        
+        return {
+            "id": db_session_id,
+            "session_id": session_id_str,
+            "name": f"拆题会话 - {filename}",
+            "status": "awaiting_review",
+            "created_at": str(new_session[1]),
+            "total_items": total_items,
+            "processed_items": total_items,
+            "message": f"拆题会话创建成功，已从{process_result['file_type']}中提取了{total_items}道题目"
+        }
+        
+    except Exception as e:
+        # 更新会话状态为失败
+        db.execute(
+            text("UPDATE ingest_sessions SET status = 'failed' WHERE id = :id"),
+            {"id": db_session_id}
+        )
+        db.commit()
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"文档处理失败: {e}")
+        raise HTTPException(status_code=500, detail=f"文档处理失败: {str(e)}")
 
 @app.get("/api/ingest/sessions/{session_id}")
 def get_ingest_session(
@@ -1290,7 +1322,7 @@ def get_ingest_items(
     
     # 先验证会话权限
     session_result = db.execute(
-        text("SELECT id FROM ingest_sessions WHERE id = :session_id AND uploader_id = :user_id"),
+        text("SELECT id FROM ingest_sessions WHERE id = :session_id AND created_by = :user_id"),
         {"session_id": session_id, "user_id": current_user["id"]}
     )
     
@@ -1343,7 +1375,7 @@ def approve_ingest_item(
             SELECT ii.id, ii.ocr_json, ii.candidate_type, ii.candidate_kps_json
             FROM ingest_items ii
             JOIN ingest_sessions is ON ii.session_id = is.id
-            WHERE ii.id = :item_id AND is.uploader_id = :user_id
+            WHERE ii.id = :item_id AND is.created_by = :user_id
         """),
         {"item_id": item_id, "user_id": current_user["id"]}
     )
@@ -1445,7 +1477,7 @@ def complete_ingest_session(
     
     # 验证会话权限
     result = db.execute(
-        text("SELECT id FROM ingest_sessions WHERE id = :session_id AND uploader_id = :user_id"),
+        text("SELECT id FROM ingest_sessions WHERE id = :session_id AND created_by = :user_id"),
         {"session_id": session_id, "user_id": current_user["id"]}
     )
     

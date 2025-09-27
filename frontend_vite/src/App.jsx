@@ -3,9 +3,11 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ConfigProvider, App as AntdApp } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { AuthProvider, useAuth } from './hooks/auth'
+import ErrorBoundary from './components/ErrorBoundary'
 import Login from './pages/Login'
 import ProLayout from './components/ProLayout'
 import QuestionBank from './pages/QuestionBank'
+import QuestionBankUpload from './pages/QuestionBankUpload'
 import PaperBuilder from './pages/PaperBuilder'
 import UploadScan from './pages/UploadScan'
 import Report from './pages/Report'
@@ -60,6 +62,7 @@ const MainApp = () => {
       <Routes>
         <Route path="/" element={<Navigate to="/questions" replace />} />
         <Route path="/questions" element={<QuestionBank />} />
+        <Route path="/questions/upload" element={<QuestionBankUpload />} />
         <Route path="/paper" element={<PaperBuilder />} />
         <Route path="/upload" element={<UploadScan />} />
         <Route path="/report" element={<Report />} />
@@ -74,43 +77,45 @@ export default function App() {
   console.log('🎯 App 组件渲染开始')
   
   return (
-    <ConfigProvider 
-      locale={zhCN}
-      theme={{
-        token: {
-          colorPrimary: '#1890ff',
-          borderRadius: 6,
-        },
-        components: {
-          Layout: {
-            headerBg: '#fff',
-            siderBg: '#fff',
+    <ErrorBoundary>
+      <ConfigProvider 
+        locale={zhCN}
+        theme={{
+          token: {
+            colorPrimary: '#1890ff',
+            borderRadius: 6,
           },
-        },
-      }}
-    >
-      <AntdApp>
-        <AuthProvider>
-          <Router
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true
-            }}
-          >
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route
-                path="/*"
-                element={
-                  <RequireAuth>
-                    <MainApp />
-                  </RequireAuth>
-                }
-              />
-            </Routes>
-          </Router>
-        </AuthProvider>
-      </AntdApp>
-    </ConfigProvider>
+          components: {
+            Layout: {
+              headerBg: '#fff',
+              siderBg: '#fff',
+            },
+          },
+        }}
+      >
+        <AntdApp>
+          <AuthProvider>
+            <Router
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true
+              }}
+            >
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route
+                  path="/*"
+                  element={
+                    <RequireAuth>
+                      <MainApp />
+                    </RequireAuth>
+                  }
+                />
+              </Routes>
+            </Router>
+          </AuthProvider>
+        </AntdApp>
+      </ConfigProvider>
+    </ErrorBoundary>
   )
 }
